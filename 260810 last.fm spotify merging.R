@@ -87,7 +87,7 @@ music_data <- bind_rows(data_json_filtered, data_lastfm) %>%
 ## Rules must be a named list, where each name is a column name in the df
 ## Values must be character vectors of length 1 or 2
 ## If length == 1, it will be used for subsetting (e.g. artist = "Coldplay")
-## If length == 2, the second value will replace all instance of the first value 
+## If length == 2, the second value will replace all instances of the first value 
 ##     in the given subset (e.g. track = c("Everglow - Edit", "Everglow"))
 replace_plays <- function(df, rules) {
     ## Validate lengths
