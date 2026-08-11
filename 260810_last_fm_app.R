@@ -1,6 +1,8 @@
 library(shiny)
 library(shinyMobile)
-
+library(ggplot2)
+library(dplyr)
+library(lubridate)
 
 app <- shinyApp(
     ui = f7Page(
@@ -73,9 +75,9 @@ app <- shinyApp(
             backdrop = TRUE,
             f7BlockTitle("Select Input"),
             f7Block(
-                
+                f7Text("input_csv", value = "https://raw.githubusercontent.com/ejade42/lastfm-dev/refs/heads/main/output_data/260810_music_data.csv")
             )
-        )
+        ),
         ## ---------------------------------------------------------------------
         
         
@@ -88,7 +90,7 @@ app <- shinyApp(
                 title = "Combined Spotify/Last.fm viewer",
                 subNavbar = f7SubNavbar(
                     f7Grid(
-                        cols = 3,
+                        cols = 4,
                         gap = 0,
                         f7Button(
                             inputId = "btn_subset", 
@@ -103,6 +105,11 @@ app <- shinyApp(
                         f7Button(
                             inputId = "btn_settings", 
                             label = "Settings", 
+                            fill = FALSE, outline = FALSE, shadow = FALSE
+                        ),
+                        f7Button(
+                            inputId = "btn_input",
+                            label = "Input",
                             fill = FALSE, outline = FALSE, shadow = FALSE
                         )
                     )
@@ -119,7 +126,7 @@ app <- shinyApp(
                     title = "Tracks",
                     tabName = "Tracks",
                     icon = f7Icon("music_note"),
-                    f7Block("tracks graph")
+                    f7Block(plotOutput("tracks_graph", height = "400px"))
                 ),
                 
                 f7Tab(
@@ -154,6 +161,8 @@ app <- shinyApp(
         observeEvent(input$btn_subset, { updateF7Sheet(id = "sheet_subset") })
         observeEvent(input$btn_date, { updateF7Sheet(id = "sheet_date") })
         observeEvent(input$btn_settings, { updateF7Sheet(id = "sheet_settings") })
+        observeEvent(input$btn_input, { updateF7Sheet(id = "sheet_input") })
+        
         
         # Dynamically generate the secondary dropdown for Dates based on interval
         output$dynamic_date_choices <- renderUI({
@@ -172,6 +181,62 @@ app <- shinyApp(
                 label = paste("Select", tools::toTitleCase(mode)),
                 choices = choices
             )
+        })
+        
+        
+        
+        
+        ## Load the data
+        full_data <- reactive({
+            req(input$input_csv)
+            read.csv(input$input_csv)
+        })
+        
+        subset_data <- reactive({
+            partial_subset <- full_data()
+            if (FALSE) {
+            #if (!is.null(input$subset_artist)) {
+                partial_subset <- filter(partial_subset, artist == input$subset_artist)
+                    
+                if (!is.null(input$subset_track)) {
+                    partial_subset <- filter(partial_subset, track == input$subset_track)
+                }
+                if (!is.null(input$subset_album)) {
+                    partial_subset <- filter(partial_subset, album == input$subset_album)
+                }
+            }
+            partial_subset
+        })
+        
+        ## Read settings to get subset to graph
+        graph_rows <- reactive({
+            req(input$plot_start, input$plot_count)
+            c(input$plot_start, input$plot_start + input$plot_count - 1)
+        })
+        
+        ## Create graph
+        output$tracks_graph <- renderPlot({
+            req(input$tabs == "Tracks")
+            
+            tracks_data <- subset_data() %>%
+                group_by(artist, track) %>%
+                summarise(plays = n(), .groups = "drop") %>%
+                arrange(desc(plays)) %>%
+                mutate(
+                    rank = row_number(),
+                    label = paste0(rank, ". ", track, "\n", artist)
+                )
+            
+            req(nrow(tracks_data) > 0)
+            
+            idx <- graph_rows()
+            max_row <- min(idx[2], nrow(tracks_data))
+            plot_data <- tracks_data[idx[1]:max_row, ]
+            
+            ggplot(plot_data, aes(y = reorder(label, plays), x = plays)) +
+                geom_col() +
+                scale_y_discrete(labels = )
+        
         })
     }
 )
