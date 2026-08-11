@@ -3,6 +3,9 @@ library(shinyMobile)
 library(ggplot2)
 library(dplyr)
 library(lubridate)
+library(cachem)
+
+shinyOptions(cache = cache_disk("./app_cache", max_age = 86400))
 
 app <- shinyApp(
     ui = f7Page(
@@ -123,10 +126,11 @@ app <- shinyApp(
                 animated = FALSE,
                 
                 f7Tab(
+                    active = TRUE,
                     title = "Tracks",
                     tabName = "Tracks",
                     icon = f7Icon("music_note"),
-                    f7Block(plotOutput("tracks_graph", height = "400px"))
+                    f7Block(plotOutput("tracks_graph", width = "100%", height = "calc(100vh - 250px)"))
                 ),
                 
                 f7Tab(
@@ -141,6 +145,13 @@ app <- shinyApp(
                     tabName = "Artists",
                     icon = f7Icon("person_circle"),
                     f7Block("artists graph")
+                ),
+                
+                f7Tab(
+                    title = "Over time",
+                    tabName = "over_time",
+                    icon = f7Icon("calendar"),
+                    f7Block("time graph")
                 ),
                 
                 f7Tab(
@@ -190,18 +201,17 @@ app <- shinyApp(
         full_data <- reactive({
             req(input$input_csv)
             read.csv(input$input_csv)
-        })
+        }) %>% bindCache(input$input_csv, Sys.Date())
         
         subset_data <- reactive({
             partial_subset <- full_data()
-            if (FALSE) {
-            #if (!is.null(input$subset_artist)) {
+            if (input$subset_artist != "") {
                 partial_subset <- filter(partial_subset, artist == input$subset_artist)
                     
-                if (!is.null(input$subset_track)) {
+                if (input$subset_track != "") {
                     partial_subset <- filter(partial_subset, track == input$subset_track)
                 }
-                if (!is.null(input$subset_album)) {
+                if (input$subset_album != "") {
                     partial_subset <- filter(partial_subset, album == input$subset_album)
                 }
             }
@@ -218,13 +228,22 @@ app <- shinyApp(
         output$tracks_graph <- renderPlot({
             req(input$tabs == "Tracks")
             
+            ## Make these configurable later
+            text_outside_threshold <- 0.15
+            text_outside_displacement <- 0.25
+            text_inside_colour <- "white"
+            text_outside_colour <- "black"
+            
+            ##### could we instead do the first group_by dynamically, so that we only need this code once for tracks / albums / artists?
             tracks_data <- subset_data() %>%
                 group_by(artist, track) %>%
                 summarise(plays = n(), .groups = "drop") %>%
-                arrange(desc(plays)) %>%
+                arrange(desc(plays), track) %>%  ## Need to keep tweaking to fix order of ties (make alphabetical)
                 mutate(
                     rank = row_number(),
-                    label = paste0(rank, ". ", track, "\n", artist)
+                    label = paste0(rank, ". ", track, "\n", artist),
+                    is_short = plays < (max(plays) * text_outside_threshold),
+                    text_hjust = if_else(is_short, -text_outside_displacement, 1 + text_outside_displacement), 
                 )
             
             req(nrow(tracks_data) > 0)
@@ -235,8 +254,14 @@ app <- shinyApp(
             
             ggplot(plot_data, aes(y = reorder(label, plays), x = plays)) +
                 geom_col() +
-                scale_y_discrete(labels = )
-        
+                geom_text(aes(label = plays, hjust = text_hjust, col = as.character(is_short))) +
+                scale_colour_manual(values = c("TRUE" = text_outside_colour, "FALSE" = text_inside_colour)) +
+                coord_cartesian(xlim = c(0, NA), expand = FALSE) +
+                theme_bw(base_size = 20) +
+                theme(panel.grid.major.y = element_blank(),
+                      panel.grid.minor.y = element_blank(),
+                      axis.title = element_blank()) +
+                guides(col = "none")
         })
     }
 )
