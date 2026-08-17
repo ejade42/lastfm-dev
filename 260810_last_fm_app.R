@@ -4,6 +4,7 @@ library(ggplot2)
 library(dplyr)
 library(lubridate)
 library(cachem)
+library(ggtext)
 
 shinyOptions(cache = cache_disk("./app_cache", max_age = 86400))
 
@@ -17,11 +18,7 @@ app <- shinyApp(
             swipeToClose = TRUE,
             backdrop = TRUE,
             f7BlockTitle("Filter Data Subset"),
-            f7Block(
-                f7Text("subset_artist", "Artist Name", placeholder = "e.g., Coldplay"),
-                f7Text("subset_album", "Album (Optional)", placeholder = "e.g., Parachutes"),
-                f7Text("subset_track", "Track (Optional)", placeholder = "e.g., Yellow")
-            )
+            uiOutput("subset_controls")
         ),
         
         f7Sheet(
@@ -32,8 +29,8 @@ app <- shinyApp(
             f7BlockTitle("Select Time Period"),
             f7Block(
                 f7Select(
-                    inputId = "date_mode",
-                    label = "Interval Type",
+                    "date_mode",
+                    "Interval Type",
                     choices = c("Year" = "year", "Month" = "month", "Week" = "week", "Day" = "day", "Custom" = "custom"),
                     selected = "year"
                 ),
@@ -60,8 +57,15 @@ app <- shinyApp(
             backdrop = TRUE,
             f7BlockTitle("Plot Settings"),
             f7Block(
+                #f7SmartSelect(
+                #    "selected_timezone",
+                #    label = "Time zone",
+                #    choices = OlsonNames(),
+                    #openIn = "popup",
+                #    selected = Sys.timezone()
+                #),
                 f7Select(
-                    inputId = "plot_color",
+                    "plot_color",
                     label = "Bar Color",
                     choices = c("Blue" = "#007aff", "Green" = "#4cd964", "Red" = "#ff3b30", "Purple" = "#af52de"),
                     selected = "#007aff"
@@ -95,26 +99,10 @@ app <- shinyApp(
                     f7Grid(
                         cols = 4,
                         gap = 0,
-                        f7Button(
-                            inputId = "btn_subset", 
-                            label = "Subset", 
-                            fill = FALSE, outline = FALSE, shadow = FALSE
-                        ),
-                        f7Button(
-                            inputId = "btn_date", 
-                            label = "Date", 
-                            fill = FALSE, outline = FALSE, shadow = FALSE
-                        ),
-                        f7Button(
-                            inputId = "btn_settings", 
-                            label = "Settings", 
-                            fill = FALSE, outline = FALSE, shadow = FALSE
-                        ),
-                        f7Button(
-                            inputId = "btn_input",
-                            label = "Input",
-                            fill = FALSE, outline = FALSE, shadow = FALSE
-                        )
+                        f7Button("btn_subset", "Subset", fill = FALSE, outline = FALSE, shadow = FALSE),
+                        f7Button("btn_date", "Date", fill = FALSE, outline = FALSE, shadow = FALSE),
+                        f7Button("btn_settings", "Settings", fill = FALSE, outline = FALSE, shadow = FALSE),
+                        f7Button("btn_input", "Input", fill = FALSE, outline = FALSE, shadow = FALSE)
                     )
                 )
             ),
@@ -187,12 +175,10 @@ app <- shinyApp(
                               "day" = c("Today", "Yesterday", "2 Days Ago")
             )
             
-            f7Select(
-                inputId = "date_preset",
-                label = paste("Select", tools::toTitleCase(mode)),
-                choices = choices
-            )
+            f7Select("date_preset", paste("Select", tools::toTitleCase(mode)), choices = choices)
         })
+        
+        
         
         
         
@@ -203,18 +189,46 @@ app <- shinyApp(
             read.csv(input$input_csv)
         }) %>% bindCache(input$input_csv, Sys.Date())
         
+        ## Update autocomplete options
+        output$subset_controls <- renderUI({
+            df <- full_data()
+            req(is.data.frame(df), nrow(df) > 0)
+            
+            names(df) <- tolower(names(df))
+            
+            artist_options <- c("", sort(unique(df$artist)))
+            album_options  <- c("", sort(unique(df$album)))
+            track_options  <- c("", sort(unique(df$track)))
+            
+            req(length(artist_options) > 0)
+            req(length(album_options) > 0)
+            req(length(track_options) > 0)
+            
+            f7List(
+                f7SmartSelect("subset_artist", "Artist", choices = artist_options, openIn = "popup", searchbar = TRUE),
+                f7SmartSelect("subset_album", "Album", choices = album_options, openIn = "popup", searchbar = TRUE),
+                f7SmartSelect("subset_track", "Track", choices = track_options, openIn = "popup", searchbar = TRUE)
+            )
+        })
+        
+        
+        
         subset_data <- reactive({
             partial_subset <- full_data()
-            if (input$subset_artist != "") {
-                partial_subset <- filter(partial_subset, artist == input$subset_artist)
-                    
-                if (input$subset_track != "") {
-                    partial_subset <- filter(partial_subset, track == input$subset_track)
-                }
-                if (input$subset_album != "") {
-                    partial_subset <- filter(partial_subset, album == input$subset_album)
-                }
+            ## Subsetting artist / track / album
+            if (!is.null(input$subset_artist) && input$subset_artist != "") {
+                partial_subset <- filter(partial_subset, tolower(artist) == tolower(input$subset_artist))
             }
+            if (!is.null(input$subset_album) && input$subset_album != "") {
+                partial_subset <- filter(partial_subset, tolower(album) == tolower(input$subset_album))
+            }
+            if (!is.null(input$subset_track) && input$subset_track != "") {
+                partial_subset <- filter(partial_subset, tolower(track) == tolower(input$subset_track))
+            }
+            
+            ## Subsetting date
+            
+            
             partial_subset
         })
         
@@ -238,12 +252,16 @@ app <- shinyApp(
             tracks_data <- subset_data() %>%
                 group_by(artist, track) %>%
                 summarise(plays = n(), .groups = "drop") %>%
-                arrange(desc(plays), track) %>%  ## Need to keep tweaking to fix order of ties (make alphabetical)
+                arrange(desc(plays), track)
+                
+            max_plays <- ifelse(length(tracks_data$plays) > 0, max(tracks_data$plays), 0)
+            
+            tracks_data <- tracks_data %>%
                 mutate(
                     rank = row_number(),
-                    label = paste0(rank, ". ", track, "\n", artist),
-                    is_short = plays < (max(plays) * text_outside_threshold),
-                    text_hjust = if_else(is_short, -text_outside_displacement, 1 + text_outside_displacement), 
+                    label = paste0(rank, "\\. **", track, "**<br>", artist),
+                    is_short = plays < (max_plays * text_outside_threshold),
+                    text_hjust = if_else(is_short, -text_outside_displacement, 1 + text_outside_displacement) 
                 )
             
             req(nrow(tracks_data) > 0)
@@ -252,7 +270,7 @@ app <- shinyApp(
             max_row <- min(idx[2], nrow(tracks_data))
             plot_data <- tracks_data[idx[1]:max_row, ]
             
-            ggplot(plot_data, aes(y = reorder(label, plays), x = plays)) +
+            ggplot(plot_data, aes(y = reorder(label, desc(rank)), x = plays)) +
                 geom_col() +
                 geom_text(aes(label = plays, hjust = text_hjust, col = as.character(is_short))) +
                 scale_colour_manual(values = c("TRUE" = text_outside_colour, "FALSE" = text_inside_colour)) +
@@ -260,7 +278,8 @@ app <- shinyApp(
                 theme_bw(base_size = 20) +
                 theme(panel.grid.major.y = element_blank(),
                       panel.grid.minor.y = element_blank(),
-                      axis.title = element_blank()) +
+                      axis.title = element_blank(),
+                      axis.text.y = element_markdown()) +
                 guides(col = "none")
         })
     }
