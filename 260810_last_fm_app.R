@@ -18,7 +18,11 @@ app <- shinyApp(
             swipeToClose = TRUE,
             backdrop = TRUE,
             f7BlockTitle("Filter Data Subset"),
-            uiOutput("subset_controls")
+            f7List(
+                uiOutput("ui_subset_artist"),
+                uiOutput("ui_subset_album"),
+                uiOutput("ui_subset_track")
+            )
         ),
         
         f7Sheet(
@@ -190,25 +194,46 @@ app <- shinyApp(
         }) %>% bindCache(input$input_csv, Sys.Date())
         
         ## Update autocomplete options
-        output$subset_controls <- renderUI({
+        output$ui_subset_artist <- renderUI({
             df <- full_data()
             req(is.data.frame(df), nrow(df) > 0)
-            
             names(df) <- tolower(names(df))
             
             artist_options <- c("", sort(unique(df$artist)))
-            album_options  <- c("", sort(unique(df$album)))
-            track_options  <- c("", sort(unique(df$track)))
             
-            req(length(artist_options) > 0)
-            req(length(album_options) > 0)
-            req(length(track_options) > 0)
+            f7SmartSelect("subset_artist", "Artist", choices = artist_options, openIn = "popup", searchbar = TRUE)
+        })
+        
+        output$ui_subset_album <- renderUI({
+            df <- full_data()
+            req(is.data.frame(df), nrow(df) > 0)
+            names(df) <- tolower(names(df))
             
-            f7List(
-                f7SmartSelect("subset_artist", "Artist", choices = artist_options, openIn = "popup", searchbar = TRUE),
-                f7SmartSelect("subset_album", "Album", choices = album_options, openIn = "popup", searchbar = TRUE),
-                f7SmartSelect("subset_track", "Track", choices = track_options, openIn = "popup", searchbar = TRUE)
-            )
+            sel_artist <- input$subset_artist
+            if (!is.null(sel_artist) && sel_artist != "") {
+                df <- filter(df, tolower(artist) == tolower(sel_artist))
+            }
+            
+            album_options <- c("", sort(unique(df$album)))
+            f7SmartSelect("subset_album", "Album", choices = album_options, openIn = "popup", searchbar = TRUE)
+        })
+        
+        output$ui_subset_track <- renderUI({
+            df <- full_data()
+            req(is.data.frame(df), nrow(df) > 0)
+            names(df) <- tolower(names(df))
+            
+            sel_artist <- input$subset_artist
+            sel_album  <- input$subset_album
+            if (!is.null(sel_artist) && sel_artist != "") {
+                df <- filter(df, tolower(artist) == tolower(sel_artist))
+            }
+            if (!is.null(sel_album) && sel_album != "") {
+                df <- filter(df, tolower(album) == tolower(sel_album))
+            }
+            
+            track_options <- c("", sort(unique(df$track)))
+            f7SmartSelect("subset_track", "Track", choices = track_options, openIn = "popup", searchbar = TRUE)
         })
         
         
