@@ -8,6 +8,33 @@ library(ggtext)
 
 shinyOptions(cache = cache_disk("./app_cache", max_age = 86400))
 
+## Function for putting persistent popups into UI
+customF7Popup <- function(id, title, ..., close_text = "Close") {
+    shiny::tags$div(
+        id = id,
+        class = "popup", 
+        shiny::tags$div(class = "view",
+            shiny::tags$div(class = "page",
+                # Popup Header / Navbar
+                shiny::tags$div(class = "navbar",
+                    shiny::tags$div(class = "navbar-bg"),
+                    shiny::tags$div(class = "navbar-inner",
+                        shiny::tags$div(class = "title", title),
+                        shiny::tags$div(class = "right",
+                            shiny::tags$a(href = "#", class = "link popup-close", close_text)
+                        )
+                    )
+                ),
+                # Popup Content (uses the ... argument to insert your UI elements)
+                shiny::tags$div(class = "page-content",
+                    ...
+                )
+            )
+        )
+    )
+}
+
+
 app <- shinyApp(
     ui = f7Page(
         tags$head(
@@ -20,31 +47,13 @@ app <- shinyApp(
         
         ## SHEETS FOR SETTINGS
         ## ---------------------------------------------------------------------
-        tags$div(
-            id = "popup_subset",
-            class = "popup", # Tells Framework7 this is a popup
-            tags$div(class = "view",
-                     tags$div(class = "page",
-                              # Popup Header / Navbar
-                              tags$div(class = "navbar",
-                                       tags$div(class = "navbar-bg"),
-                                       tags$div(class = "navbar-inner",
-                                                tags$div(class = "title", "Make a subset"),
-                                                tags$div(class = "right",
-                                                         # Built-in framework7 close button class
-                                                         tags$a(href = "#", class = "link popup-close", "Close")
-                                                )
-                                       )
-                              ),
-                              # Popup Content
-                              tags$div(class = "page-content",
-                                       f7List(
-                                           uiOutput("ui_subset_artist"),
-                                           uiOutput("ui_subset_album"),
-                                           uiOutput("ui_subset_track")
-                                       )
-                              )
-                     )
+        customF7Popup(
+            "popup_subset",
+            "Filter Data Subset",
+            f7List(
+                uiOutput("ui_subset_artist"),
+                uiOutput("ui_subset_album"),
+                uiOutput("ui_subset_track")
             )
         ),
         
