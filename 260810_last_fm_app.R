@@ -111,26 +111,29 @@ app <- shinyApp(
                     f7Select(
                         "date_mode",
                         "Interval",
-                        choices = c("Year" = "year", "Month" = "month", "Week" = "week", "Day" = "day", "Custom" = "custom"),
-                        selected = "year"
+                        choices = c("All time" = "alltime", "Year" = "year", "Month" = "month", "Week" = "week", "Day" = "day", "Custom" = "custom"),
+                        selected = "alltime"
                     ),
                     
                     # Shows for predefined intervals (Year/Month/Week/Day)
                     conditionalPanel(
-                        condition = "input.date_mode != 'custom'",
+                        condition = "input.date_mode != 'custom' & input.date_mode != 'alltime'",
                         f7Select(
                             "date_reference", 
                             "Reference date",
-                            choices = c("To date", "Calendar"),
-                            select = "To date",
+                            choices = c("To today", "To date", "Calendar"),
+                            select = "To today",
                         )
                     )
                 ),
     
+                # Shows only when 'Calendar' is selected
                 conditionalPanel(
-                    condition = "input.date_mode != 'custom' & input.date_reference == 'Calendar'",
+                    condition = "input.date_mode != 'custom' & input.date_mode != 'alltime' & input.date_reference == 'Calendar'",
                     uiOutput("dynamic_date_choices")
                 ),
+                
+                # Shows only when 'To date' is selected
                 
                 
                 # Shows only when "Custom" is selected
@@ -246,7 +249,8 @@ app <- shinyApp(
         observeEvent(input$btn_settings, { updateF7Sheet(id = "sheet_settings") })
         observeEvent(input$btn_input, { updateF7Sheet(id = "sheet_input") })
         
-        
+        ## DATA LOADING
+        ## ---------------------------------------------------------------------
         ## Load the data
         raw_data <- reactive({
             req(input$input_csv)
@@ -265,16 +269,22 @@ app <- shinyApp(
                 select(datetime_utc, track, artist, album) %>%
                 mutate(
                     datetime_utc = as_datetime(datetime_utc),
+                    date    = as_date(datetime_utc, tz = input$selected_timezone),
                     year    = format(datetime_utc, "%Y", tz = input$selected_timezone),
-                    month   = format(datetime_utc, "%b %Y", tz = input$selected_timezone),
-                    day     = format(datetime_utc, "%d %b %Y", tz = input$selected_timezone),
                     utc_sec = as.numeric(datetime_utc)
                 )
         })
+        ## ---------------------------------------------------------------------
         
         
-        # Dynamically generate the secondary dropdown for Dates based on interval
+        
+        
+        
+        ## DATE SUBSET MANAGEMENT
+        ## ---------------------------------------------------------------------
         date_picker_title_style <- "font-weight: bold; font-size: 16px; margin-bottom: -10px; margin-right: -10px, color: #8e8e93;"
+        
+        ## Create and populate main (non-custom) date picker
         output$dynamic_date_choices <- renderUI({
             df <- full_data()
             req(is.data.frame(df), nrow(df) > 0)
@@ -324,6 +334,7 @@ app <- shinyApp(
             }
         })
         
+        ## Create custom date picker
         output$custom_date_choices <- renderUI({
             df <- full_data()
             req(is.data.frame(df), nrow(df) > 0)
@@ -393,8 +404,8 @@ app <- shinyApp(
         
         
         
-        # Update user choice ONLY when user physically changes the day picker
-        # 1. State tracking for values and skip counters
+        ## Update user choice ONLY when user physically changes the day picker
+        ## 1. State tracking for values and skip counters
         saved_days <- reactiveValues(
             dynamic = as.numeric(format(Sys.time(), "%d")), 
             dynamic_target = as.numeric(format(Sys.time(), "%d")),
@@ -406,14 +417,14 @@ app <- shinyApp(
             custom_end_target = as.numeric(format(Sys.time(), "%d"))
         )
         
-        # Counter to absorb server-initiated UI re-render echoes
+        ## Counter to absorb server-initiated UI re-render echoes
         skip_count <- reactiveValues(
             dynamic = 1,
             custom_start = 1,
             custom_end = 1
         )
         
-        # 2. Observers: Only update target if event was NOT produced by a server re-render
+        ## 2. Observers: Only update target if event was NOT produced by a server re-render
         observeEvent(input$day_select, {
             if (!is.null(input$day_select) && input$day_select != "" && input$day_select != "NA") {
                 extracted <- as.numeric(stringr::str_extract(input$day_select, "\\d+"))
@@ -456,7 +467,7 @@ app <- shinyApp(
             }
         })
         
-        # 3. Render Blocks: Increment skip counter before rendering
+        ## 3. Render Blocks: Increment skip counter before rendering
         output$dynamic_day_picker_ui <- renderUI({
             req(input$month_select, input$year_select)
             new_choices <- generate_day_choices(input$year_select, input$month_select)
@@ -505,12 +516,13 @@ app <- shinyApp(
                 choices = new_choices, scrollToInput = TRUE
             )
         })
+        ## ---------------------------------------------------------------------
         
         
         
         
-        
-        ## Update autocomplete options
+        ## POPULATE ARTIST / ALBUM / TRACK SUBSET INPUTS
+        ## ---------------------------------------------------------------------
         output$ui_subset_artist <- renderUI({
             df <- full_data()
             req(is.data.frame(df), nrow(df) > 0)
@@ -552,9 +564,14 @@ app <- shinyApp(
             track_options <- c("", sort(unique(df$track)))
             f7SmartSelect("subset_track", "Track", choices = track_options, openIn = "popup", searchbar = TRUE)
         })
+        ## ---------------------------------------------------------------------
         
         
         
+        
+        
+        ## PERFORM ACTUAL DATA SUBSETTING
+        ## ---------------------------------------------------------------------
         subset_data <- reactive({
             partial_subset <- full_data()
             ## Subsetting artist / track / album
@@ -568,12 +585,54 @@ app <- shinyApp(
                 partial_subset <- filter(partial_subset, tolower(track) == tolower(input$subset_track))
             }
             
-            ## Subsetting date
-            
+            ## Subsetting date - Inclusive at both ends
+            date_range <- switch(
+                input$date_mode,
+                "alltime"={
+                    c(
+                        as_date(min(full_data()$datetime_utc), tz = input$selected_timezone),
+                        as_date(max(full_data()$datetime_utc), tz = input$selected_timezone)
+                    )
+                },
+                "year"={
+                    if (input$date_reference == "Calendar") {
+                        c(
+                            as_date(paste0(input$year_picker, "-01-01"), tz = input$selected_timezone),
+                            as_date(paste0(input$year_picker, "-12-31"), tz = input$selected_timezone)
+                        )
+                    } else if (input$date_reference == "To today") {
+                        c(
+                            as_date(Sys.time() - years(1) + days(1), tz = input$selected_timezone),
+                            as_date(Sys.time(), tz = input$selected_timezone)
+                        )
+                    } else if (input$date_reference == "To date") {
+                        
+                    }
+                },
+                "month"={
+                    
+                },
+                "week"={
+                    
+                },
+                "day"={
+                    
+                },
+                "custom"={
+                    
+                }
+            )
             
             partial_subset
         })
+        ## ---------------------------------------------------------------------
         
+        
+        
+        
+        
+        ## GRAPHING
+        ## ---------------------------------------------------------------------
         ## Read settings to get subset to graph
         graph_rows <- reactive({
             req(input$plot_start, input$plot_count)
@@ -624,6 +683,7 @@ app <- shinyApp(
                       axis.text.y = element_markdown()) +
                 guides(col = "none")
         })
+        ## ---------------------------------------------------------------------
     }
 )
 
