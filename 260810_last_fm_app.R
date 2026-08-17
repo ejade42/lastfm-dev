@@ -244,11 +244,14 @@ app <- shinyApp(
                     month_picker <- NULL
                 }
                 
-                f7Grid(
-                    cols = 3,
-                    day_picker,
-                    month_picker,
-                    year_picker
+                tags$div(
+                    class = "custom-stacked-pickers",
+                    style = "display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; width: 100%;",
+                    
+                    # If a picker is NULL, tags$div() creates an empty placeholder keeping the column structure intact
+                    tags$div(day_picker),
+                    tags$div(month_picker),
+                    tags$div(year_picker)
                 )
                 
             } else {
