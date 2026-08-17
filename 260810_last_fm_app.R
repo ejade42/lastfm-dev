@@ -43,6 +43,30 @@ app <- shinyApp(
                 Shiny.addCustomMessageHandler('open_f7_popup', function(id) {
                     app.popup.open('#' + id);
                 });
+            ")),
+            tags$style(HTML("
+                /* 1. Reduce the large outer margins of blocks and lists inside popups */
+                .popup .block, 
+                .popup .list {
+                    margin-top: 15px !important;
+                    margin-bottom: 15px !important;
+                }
+
+                /* 2. Reduce the minimum height and padding of list items (like f7SmartSelect and f7Select) */
+                .popup .list .item-content {
+                    min-height: 36px !important; /* Default is usually 48px */
+                }
+                
+                .popup .list .item-inner {
+                    min-height: 36px !important;
+                    padding-top: 4px !important;
+                    padding-bottom: 4px !important;
+                }
+
+                /* 3. Tighten the space between conditionalPanels and standalone inputs */
+                .popup .shiny-input-container {
+                    margin-bottom: 10px !important;
+                }
             "))
         ),
         
@@ -62,24 +86,33 @@ app <- shinyApp(
             "popup_date",
             "Select Time Period",
             f7Block(
-                f7Grid(cols = 2,
-                f7Select(
-                    "date_mode",
-                    "Interval",
-                    choices = c("Year" = "year", "Month" = "month", "Week" = "week", "Day" = "day", "Custom" = "custom"),
-                    selected = "year"
+                f7SmartSelect(
+                    "selected_timezone",
+                    label = "Time zone",
+                    choices = OlsonNames(),
+                    openIn = "popup",
+                    selected = Sys.timezone()
                 ),
                 
-                # Shows for predefined intervals (Year/Month/Week/Day)
-                conditionalPanel(
-                    condition = "input.date_mode != 'custom'",
+                f7Grid(cols = 2,
                     f7Select(
-                        "date_reference", 
-                        "Reference date",
-                        choices = c("To date", "Calendar"),
-                        select = "To date",
+                        "date_mode",
+                        "Interval",
+                        choices = c("Year" = "year", "Month" = "month", "Week" = "week", "Day" = "day", "Custom" = "custom"),
+                        selected = "year"
+                    ),
+                    
+                    # Shows for predefined intervals (Year/Month/Week/Day)
+                    conditionalPanel(
+                        condition = "input.date_mode != 'custom'",
+                        f7Select(
+                            "date_reference", 
+                            "Reference date",
+                            choices = c("To date", "Calendar"),
+                            select = "To date",
+                        )
                     )
-                )),
+                ),
     
                 conditionalPanel(
                     condition = "input.date_mode != 'custom' & input.date_reference == 'Calendar'",
@@ -90,8 +123,7 @@ app <- shinyApp(
                 # Shows only when "Custom" is selected
                 conditionalPanel(
                     condition = "input.date_mode == 'custom'",
-                    dateInput("date_from", "From (Default: Start of dataset)", value = "2010-01-01"),
-                    dateInput("date_to", "To (Default: Current)", value = Sys.Date())
+                    uiOutput("custom_date_choices")
                 )
             )
         ),
@@ -103,13 +135,6 @@ app <- shinyApp(
             backdrop = TRUE,
             f7BlockTitle("Plot Settings"),
             f7Block(
-                #f7SmartSelect(
-                #    "selected_timezone",
-                #    label = "Time zone",
-                #    choices = OlsonNames(),
-                    #openIn = "popup",
-                #    selected = Sys.timezone()
-                #),
                 f7Select(
                     "plot_color",
                     label = "Bar Color",
@@ -210,7 +235,7 @@ app <- shinyApp(
         
         
         ## Load the data
-        full_data <- reactive({
+        raw_data <- reactive({
             req(input$input_csv)
             read.csv(input$input_csv) %>%
                 mutate(across(
@@ -220,9 +245,23 @@ app <- shinyApp(
                 ))
         }) %>% bindCache(input$input_csv, Sys.Date())
         
+        ## Change all dates when timezone changes
+        full_data <- reactive({
+            req(input$selected_timezone)
+            raw_data() %>%
+                select(datetime_utc, track, artist, album) %>%
+                mutate(
+                    datetime_utc = as_datetime(datetime_utc),
+                    year    = format(datetime_utc, "%Y", tz = input$selected_timezone),
+                    month   = format(datetime_utc, "%b %Y", tz = input$selected_timezone),
+                    day     = format(datetime_utc, "%d %b %Y", tz = input$selected_timezone),
+                    utc_sec = as.numeric(datetime_utc)
+                )
+        })
         
         
         # Dynamically generate the secondary dropdown for Dates based on interval
+        date_picker_title_style <- "font-weight: bold; font-size: 16px; margin-bottom: -10px; margin-right: -10px, color: #8e8e93;"
         output$dynamic_date_choices <- renderUI({
             df <- full_data()
             req(is.data.frame(df), nrow(df) > 0)
@@ -233,9 +272,21 @@ app <- shinyApp(
                 months <- month.name
                 days <- as.character(1:31)
                 
-                day_picker <- f7Picker("day_select", "Day", value = format(Sys.Date(), "%d"), choices = days, scrollToInput = TRUE)
-                month_picker <- f7Picker("month_select", "Month", value = format(Sys.Date(), "%B"), choices = months, scrollToInput = TRUE)
-                year_picker <- f7Picker("year_select", "Year", value = format(Sys.Date(), "%Y"), choices = years, scrollToInput = TRUE)
+                day_picker <- f7Picker(
+                    "day_select", "Day", 
+                    value = format(Sys.time(), "%d", tz = input$selected_timezone), 
+                    choices = days, scrollToInput = TRUE
+                )
+                month_picker <- f7Picker(
+                    "month_select", "Month", 
+                    value = format(Sys.time(), "%B", tz = input$selected_timezone), 
+                    choices = months, scrollToInput = TRUE
+                )
+                year_picker <- f7Picker(
+                    "year_select", "Year", 
+                    value = format(Sys.time(), "%Y", tz = input$selected_timezone), 
+                    choices = years, scrollToInput = TRUE
+                )
                 
                 if (mode %in% c("month", "year")) {
                     day_picker <- NULL
@@ -245,18 +296,92 @@ app <- shinyApp(
                 }
                 
                 tags$div(
-                    class = "custom-stacked-pickers",
-                    style = "display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; width: 100%;",
-                    
-                    # If a picker is NULL, tags$div() creates an empty placeholder keeping the column structure intact
-                    tags$div(day_picker),
-                    tags$div(month_picker),
-                    tags$div(year_picker)
+                    tags$div(paste0("Selected ", str_to_title(mode)), style = date_picker_title_style),
+                    tags$div(
+                        class = "custom-stacked-pickers",
+                        style = "display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; width: 100%;",
+                        
+                        # If a picker is NULL, tags$div() creates an empty placeholder keeping the column structure intact
+                        tags$div(day_picker),
+                        tags$div(month_picker),
+                        tags$div(year_picker)
+                    )
                 )
                 
             } else {
                 "weeks still need to be processed"
             }
+        })
+        
+        output$custom_date_choices <- renderUI({
+            df <- full_data()
+            req(is.data.frame(df), nrow(df) > 0)
+            
+            start_datetime <- min(df$datetime_utc)
+            years <- as.character(unique(df$year))
+            months <- month.name
+            days <- as.character(1:31)
+
+            
+            ## Set up pickers
+            start_day_picker <- f7Picker(
+                "custom_start_day", "Day", 
+                value = format(start_datetime, "%d", tz = input$selected_timezone), 
+                choices = days, scrollToInput = TRUE
+            )
+            start_month_picker <- f7Picker(
+                "custom_start_month", "Month", 
+                value = format(start_datetime, "%B", tz = input$selected_timezone), 
+                choices = months, scrollToInput = TRUE
+            )
+            start_year_picker <- f7Picker(
+                "custom_start_year", "Year", 
+                value = format(start_datetime, "%Y", tz = input$selected_timezone), 
+                choices = years, scrollToInput = TRUE
+            )
+            
+            end_day_picker <- f7Picker(
+                "custom_end_day", "Day", 
+                value = format(Sys.time(), "%d", tz = input$selected_timezone), 
+                choices = days, scrollToInput = TRUE
+            )
+            end_month_picker <- f7Picker(
+                "custom_end_month", "Month", 
+                value = format(Sys.time(), "%B", tz = input$selected_timezone), 
+                choices = months, scrollToInput = TRUE
+            )
+            end_year_picker <- f7Picker(
+                "custom_end_year", "Year", 
+                value = format(Sys.time(), "%Y", tz = input$selected_timezone), 
+                choices = years, scrollToInput = TRUE
+            )
+            
+            
+            ## Create two divs
+            tags$div(
+                tags$div(
+                    tags$div("Start Date", style = date_picker_title_style),
+                    tags$div(
+                        class = "custom-stacked-pickers",
+                        style = "display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; width: 100%;",
+    
+                        tags$div(start_day_picker),
+                        tags$div(start_month_picker),
+                        tags$div(start_year_picker)
+                    )
+                ),
+                tags$div(
+                    tags$div("End Date", style = date_picker_title_style),
+                    tags$div(
+                        class = "custom-stacked-pickers",
+                        style = "display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; width: 100%;",
+    
+                        tags$div(end_day_picker),
+                        tags$div(end_month_picker),
+                        tags$div(end_year_picker)
+                    )
+                )
+            )
         })
         
         
