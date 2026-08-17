@@ -224,17 +224,36 @@ app <- shinyApp(
         
         # Dynamically generate the secondary dropdown for Dates based on interval
         output$dynamic_date_choices <- renderUI({
+            df <- full_data()
+            req(is.data.frame(df), nrow(df) > 0)
             mode <- input$date_mode
             
-            # You can populate these dynamically based on your dataset later
-            choices <- switch(mode,
-                "year" = c("Year to Date", "2026", "2025", "2024", "2023"),
-                "month" = c("Month to Date", "August 2026", "July 2026", "June 2026"),
-                "week" = c("Week to Date", "Last Week", "2 Weeks Ago"),
-                "day" = c("Today", "Yesterday", "2 Days Ago")
-            )
-            
-            f7Select("date_preset", paste("Select", tools::toTitleCase(mode)), choices = choices)
+            if (mode != "week") {
+                years <- as.character(unique(df$year))
+                months <- month.name
+                days <- as.character(1:31)
+                
+                day_picker <- f7Picker("day_select", "Day", value = format(Sys.Date(), "%d"), choices = days, scrollToInput = TRUE)
+                month_picker <- f7Picker("month_select", "Month", value = format(Sys.Date(), "%B"), choices = months, scrollToInput = TRUE)
+                year_picker <- f7Picker("year_select", "Year", value = format(Sys.Date(), "%Y"), choices = years, scrollToInput = TRUE)
+                
+                if (mode %in% c("month", "year")) {
+                    day_picker <- NULL
+                }
+                if (mode == "year") {
+                    month_picker <- NULL
+                }
+                
+                f7Grid(
+                    cols = 3,
+                    day_picker,
+                    month_picker,
+                    year_picker
+                )
+                
+            } else {
+                "weeks still need to be processed"
+            }
         })
         
         
