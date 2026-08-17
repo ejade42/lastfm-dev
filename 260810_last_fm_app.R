@@ -10,18 +10,41 @@ shinyOptions(cache = cache_disk("./app_cache", max_age = 86400))
 
 app <- shinyApp(
     ui = f7Page(
+        tags$head(
+            tags$script(HTML("
+                Shiny.addCustomMessageHandler('open_f7_popup', function(id) {
+                    app.popup.open('#' + id);
+                });
+            "))
+        ),
+        
         ## SHEETS FOR SETTINGS
         ## ---------------------------------------------------------------------
-        f7Sheet(
-            id = "sheet_subset",
-            orientation = "bottom",
-            swipeToClose = TRUE,
-            backdrop = TRUE,
-            f7BlockTitle("Filter Data Subset"),
-            f7List(
-                uiOutput("ui_subset_artist"),
-                uiOutput("ui_subset_album"),
-                uiOutput("ui_subset_track")
+        tags$div(
+            id = "popup_subset",
+            class = "popup", # Tells Framework7 this is a popup
+            tags$div(class = "view",
+                     tags$div(class = "page",
+                              # Popup Header / Navbar
+                              tags$div(class = "navbar",
+                                       tags$div(class = "navbar-bg"),
+                                       tags$div(class = "navbar-inner",
+                                                tags$div(class = "title", "Make a subset"),
+                                                tags$div(class = "right",
+                                                         # Built-in framework7 close button class
+                                                         tags$a(href = "#", class = "link popup-close", "Close")
+                                                )
+                                       )
+                              ),
+                              # Popup Content
+                              tags$div(class = "page-content",
+                                       f7List(
+                                           uiOutput("ui_subset_artist"),
+                                           uiOutput("ui_subset_album"),
+                                           uiOutput("ui_subset_track")
+                                       )
+                              )
+                     )
             )
         ),
         
@@ -161,7 +184,7 @@ app <- shinyApp(
     
     server = function(input, output, session) {
         # Bind the top bar buttons to open their respective sheets
-        observeEvent(input$btn_subset, { updateF7Sheet(id = "sheet_subset") })
+        observeEvent(input$btn_subset, { session$sendCustomMessage("open_f7_popup", "popup_subset") })
         observeEvent(input$btn_date, { updateF7Sheet(id = "sheet_date") })
         observeEvent(input$btn_settings, { updateF7Sheet(id = "sheet_settings") })
         observeEvent(input$btn_input, { updateF7Sheet(id = "sheet_input") })
