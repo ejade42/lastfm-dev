@@ -5,6 +5,7 @@ library(dplyr)
 library(lubridate)
 library(cachem)
 library(ggtext)
+library(stringr)
 
 shinyOptions(cache = cache_disk("./app_cache", max_age = 86400))
 
@@ -222,7 +223,12 @@ app <- shinyApp(
         ## Load the data
         full_data <- reactive({
             req(input$input_csv)
-            read.csv(input$input_csv)
+            read.csv(input$input_csv) %>%
+                mutate(across(
+                    c(artist, album, track),
+                    ~ str_to_title(.) %>% 
+                      str_replace_all('"', "'")
+                ))
         }) %>% bindCache(input$input_csv, Sys.Date())
         
         ## Update autocomplete options
@@ -273,13 +279,13 @@ app <- shinyApp(
         subset_data <- reactive({
             partial_subset <- full_data()
             ## Subsetting artist / track / album
-            if (!is.null(input$subset_artist) && input$subset_artist != "") {
+            if (isTruthy(input$subset_artist)) {
                 partial_subset <- filter(partial_subset, tolower(artist) == tolower(input$subset_artist))
             }
-            if (!is.null(input$subset_album) && input$subset_album != "") {
+            if (isTruthy(input$subset_album)) {
                 partial_subset <- filter(partial_subset, tolower(album) == tolower(input$subset_album))
             }
-            if (!is.null(input$subset_track) && input$subset_track != "") {
+            if (isTruthy(input$subset_track)) {
                 partial_subset <- filter(partial_subset, tolower(track) == tolower(input$subset_track))
             }
             
