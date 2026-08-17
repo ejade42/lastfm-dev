@@ -58,16 +58,14 @@ app <- shinyApp(
             )
         ),
         
-        f7Sheet(
-            id = "sheet_date",
-            orientation = "bottom",
-            swipeToClose = TRUE,
-            backdrop = TRUE,
-            f7BlockTitle("Select Time Period"),
+        customF7Popup(
+            "popup_date",
+            "Select Time Period",
             f7Block(
+                f7Grid(cols = 2,
                 f7Select(
                     "date_mode",
-                    "Interval Type",
+                    "Interval",
                     choices = c("Year" = "year", "Month" = "month", "Week" = "week", "Day" = "day", "Custom" = "custom"),
                     selected = "year"
                 ),
@@ -75,8 +73,19 @@ app <- shinyApp(
                 # Shows for predefined intervals (Year/Month/Week/Day)
                 conditionalPanel(
                     condition = "input.date_mode != 'custom'",
+                    f7Select(
+                        "date_reference", 
+                        "Reference date",
+                        choices = c("To date", "Calendar"),
+                        select = "To date",
+                    )
+                )),
+    
+                conditionalPanel(
+                    condition = "input.date_mode != 'custom' & input.date_reference == 'Calendar'",
                     uiOutput("dynamic_date_choices")
                 ),
+                
                 
                 # Shows only when "Custom" is selected
                 conditionalPanel(
@@ -151,11 +160,10 @@ app <- shinyApp(
                 animated = FALSE,
                 
                 f7Tab(
-                    active = TRUE,
-                    title = "Tracks",
-                    tabName = "Tracks",
-                    icon = f7Icon("music_note"),
-                    f7Block(plotOutput("tracks_graph", width = "100%", height = "calc(100vh - 250px)"))
+                    title = "Artists",
+                    tabName = "Artists",
+                    icon = f7Icon("person_circle"),
+                    f7Block("artists graph")
                 ),
                 
                 f7Tab(
@@ -166,10 +174,11 @@ app <- shinyApp(
                 ),
                 
                 f7Tab(
-                    title = "Artists",
-                    tabName = "Artists",
-                    icon = f7Icon("person_circle"),
-                    f7Block("artists graph")
+                    active = TRUE,
+                    title = "Tracks",
+                    tabName = "Tracks",
+                    icon = f7Icon("music_note"),
+                    f7Block(plotOutput("tracks_graph", width = "100%", height = "calc(100vh - 250px)"))
                 ),
                 
                 f7Tab(
@@ -193,11 +202,24 @@ app <- shinyApp(
     
     
     server = function(input, output, session) {
-        # Bind the top bar buttons to open their respective sheets
+        ## Bind the top bar buttons to open their respective sheets
         observeEvent(input$btn_subset, { session$sendCustomMessage("open_f7_popup", "popup_subset") })
-        observeEvent(input$btn_date, { updateF7Sheet(id = "sheet_date") })
+        observeEvent(input$btn_date, { session$sendCustomMessage("open_f7_popup", "popup_date") })
         observeEvent(input$btn_settings, { updateF7Sheet(id = "sheet_settings") })
         observeEvent(input$btn_input, { updateF7Sheet(id = "sheet_input") })
+        
+        
+        ## Load the data
+        full_data <- reactive({
+            req(input$input_csv)
+            read.csv(input$input_csv) %>%
+                mutate(across(
+                    c(artist, album, track),
+                    ~ str_to_title(.) %>% 
+                        str_replace_all('"', "'")
+                ))
+        }) %>% bindCache(input$input_csv, Sys.Date())
+        
         
         
         # Dynamically generate the secondary dropdown for Dates based on interval
@@ -206,10 +228,10 @@ app <- shinyApp(
             
             # You can populate these dynamically based on your dataset later
             choices <- switch(mode,
-                              "year" = c("Year to Date", "2026", "2025", "2024", "2023"),
-                              "month" = c("Month to Date", "August 2026", "July 2026", "June 2026"),
-                              "week" = c("Week to Date", "Last Week", "2 Weeks Ago"),
-                              "day" = c("Today", "Yesterday", "2 Days Ago")
+                "year" = c("Year to Date", "2026", "2025", "2024", "2023"),
+                "month" = c("Month to Date", "August 2026", "July 2026", "June 2026"),
+                "week" = c("Week to Date", "Last Week", "2 Weeks Ago"),
+                "day" = c("Today", "Yesterday", "2 Days Ago")
             )
             
             f7Select("date_preset", paste("Select", tools::toTitleCase(mode)), choices = choices)
@@ -220,16 +242,7 @@ app <- shinyApp(
         
         
         
-        ## Load the data
-        full_data <- reactive({
-            req(input$input_csv)
-            read.csv(input$input_csv) %>%
-                mutate(across(
-                    c(artist, album, track),
-                    ~ str_to_title(.) %>% 
-                      str_replace_all('"', "'")
-                ))
-        }) %>% bindCache(input$input_csv, Sys.Date())
+        
         
         ## Update autocomplete options
         output$ui_subset_artist <- renderUI({
