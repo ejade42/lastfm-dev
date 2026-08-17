@@ -35,6 +35,21 @@ customF7Popup <- function(id, title, ..., close_text = "Close") {
     )
 }
 
+generate_day_choices <- function(year, month_name) {
+    month_num <- match(month_name, month.name)
+    first_day <- as.Date(paste(year, month_num, "01", sep = "-"))
+    
+    num_days <- lubridate::days_in_month(first_day)
+    dates <- first_day + lubridate::days(0:(num_days - 1))
+    
+    day_nums <- as.character(1:num_days)
+    weekdays <- lubridate::wday(dates, label = TRUE, abbr = TRUE)
+    labels <- paste0("", weekdays, " ", day_nums)
+    
+    return(labels)
+}
+## This will be used to extract the numeric day from the day label by replacing with ""
+day_number_gsub_pattern <- "* "
 
 app <- shinyApp(
     ui = f7Page(
@@ -267,15 +282,19 @@ app <- shinyApp(
             req(is.data.frame(df), nrow(df) > 0)
             mode <- input$date_mode
             
+            current_month   <- format(Sys.time(), "%B", tz = input$selected_timezone)
+            current_year    <- format(Sys.time(), "%Y", tz = input$selected_timezone)
+            current_day_num <- format(Sys.time(), "%d", tz = input$selected_timezone) %>% as.numeric()
+            
+            years <- as.character(unique(df$year))
+            months <- month.name
+            initial_day_choices <- generate_day_choices(current_year, current_month)
+            
             if (mode != "week") {
-                years <- as.character(unique(df$year))
-                months <- month.name
-                days <- as.character(1:31)
-                
                 day_picker <- f7Picker(
                     "day_select", "Day", 
-                    value = format(Sys.time(), "%d", tz = input$selected_timezone), 
-                    choices = days, scrollToInput = TRUE
+                    value = initial_day_choices[current_day_num], 
+                    choices = initial_day_choices, scrollToInput = TRUE
                 )
                 month_picker <- f7Picker(
                     "month_select", "Month", 
@@ -318,16 +337,26 @@ app <- shinyApp(
             req(is.data.frame(df), nrow(df) > 0)
             
             start_datetime <- min(df$datetime_utc)
+            start_month    <- format(start_datetime, "%B", tz = input$selected_timezone)
+            start_year     <- format(start_datetime, "%Y", tz = input$selected_timezone)
+            start_day_num  <- format(start_datetime, "%d", tz = input$selected_timezone) %>% as.numeric()
+            
+            end_datetime <- Sys.time()
+            end_month    <- format(end_datetime, "%B", tz = input$selected_timezone)
+            end_year     <- format(end_datetime, "%Y", tz = input$selected_timezone)
+            end_day_num  <- format(end_datetime, "%d", tz = input$selected_timezone) %>% as.numeric()
+            
             years <- as.character(unique(df$year))
             months <- month.name
-            days <- as.character(1:31)
+            start_day_choices <- generate_day_choices(start_year, start_month)
+            end_day_choices   <- generate_day_choices(end_year, end_month)
 
             
             ## Set up pickers
             start_day_picker <- f7Picker(
                 "custom_start_day", "Day", 
-                value = format(start_datetime, "%d", tz = input$selected_timezone), 
-                choices = days, scrollToInput = TRUE
+                value = start_day_choices[start_day_num], 
+                choices = start_day_choices, scrollToInput = TRUE
             )
             start_month_picker <- f7Picker(
                 "custom_start_month", "Month", 
@@ -342,8 +371,8 @@ app <- shinyApp(
             
             end_day_picker <- f7Picker(
                 "custom_end_day", "Day", 
-                value = format(Sys.time(), "%d", tz = input$selected_timezone), 
-                choices = days, scrollToInput = TRUE
+                value = end_day_choices[end_day_num], 
+                choices = end_day_choices, scrollToInput = TRUE
             )
             end_month_picker <- f7Picker(
                 "custom_end_month", "Month", 
@@ -357,7 +386,7 @@ app <- shinyApp(
             )
             
             
-            ## Create two divs
+            ## Create two different 3x wheel date pickers
             tags$div(
                 tags$div(
                     tags$div("Start Date", style = date_picker_title_style),
@@ -385,7 +414,87 @@ app <- shinyApp(
         })
         
         
+        ## Update day options in pickers
+        # Update the dynamic "To Date" day picker
+        observeEvent(c(input$month_select, input$year_select), {
+            # Only require month and year. DO NOT require day_select here!
+            req(input$month_select, input$year_select)
+            
+            new_choices <- generate_day_choices(input$year_select, input$month_select)
+            
+            # Safely extract the current day, default to 1 if it is NULL or NA
+            current_day_num <- 1
+            if (!is.null(input$day_select) && input$day_select != "") {
+                extracted <- as.numeric(gsub(" - .*", "", input$day_select))
+                if (!is.na(extracted)) {
+                    current_day_num <- extracted
+                }
+            }
+            
+            # Prevent out-of-bounds selection (like picking 31 in a 30-day month)
+            max_day <- length(new_choices)
+            if (current_day_num > max_day) {
+                current_day_num <- max_day
+            }
+            
+            updateF7Picker(
+                inputId = "day_select",
+                choices = new_choices,
+                value = new_choices[current_day_num]
+            )
+        }, ignoreInit = TRUE)
         
+        # Update the Custom Start Date day picker
+        observeEvent(c(input$custom_start_month, input$custom_start_year), {
+            req(input$custom_start_month, input$custom_start_year)
+            
+            new_choices <- generate_day_choices(input$custom_start_year, input$custom_start_month)
+            
+            current_day_num <- 1
+            if (!is.null(input$custom_start_day) && input$custom_start_day != "") {
+                extracted <- as.numeric(gsub(" - .*", "", input$custom_start_day))
+                if (!is.na(extracted)) {
+                    current_day_num <- extracted
+                }
+            }
+            
+            max_day <- length(new_choices)
+            if (current_day_num > max_day) {
+                current_day_num <- max_day
+            }
+            
+            updateF7Picker(
+                inputId = "custom_start_day",
+                choices = new_choices,
+                value = new_choices[current_day_num]
+            )
+        }, ignoreInit = TRUE)
+        
+        # Update the Custom End Date day picker
+        observeEvent(c(input$custom_end_month, input$custom_end_year), {
+            req(input$custom_end_month, input$custom_end_year)
+            
+            new_choices <- generate_day_choices(input$custom_end_year, input$custom_end_month)
+            
+            current_day_num <- 1
+            if (!is.null(input$custom_end_day) && input$custom_end_day != "") {
+                extracted <- as.numeric(gsub(" - .*", "", input$custom_end_day))
+                if (!is.na(extracted)) {
+                    current_day_num <- extracted
+                }
+            }
+            
+            max_day <- length(new_choices)
+            if (current_day_num > max_day) {
+                current_day_num <- max_day
+            }
+            
+            updateF7Picker(
+                inputId = "custom_end_day",
+                choices = new_choices,
+                value = new_choices[current_day_num]
+            )
+        }, ignoreInit = TRUE)
         
         
         
