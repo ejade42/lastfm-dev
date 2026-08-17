@@ -274,12 +274,6 @@ app <- shinyApp(
         
         
         # Dynamically generate the secondary dropdown for Dates based on interval
-        saved_days <- reactiveValues(
-            dynamic = as.numeric(format(Sys.time(), "%d")), 
-            custom_start = 1, # Or whatever default start day you prefer
-            custom_end = as.numeric(format(Sys.time(), "%d"))
-        )
-        
         date_picker_title_style <- "font-weight: bold; font-size: 16px; margin-bottom: -10px; margin-right: -10px, color: #8e8e93;"
         output$dynamic_date_choices <- renderUI({
             df <- full_data()
@@ -319,8 +313,6 @@ app <- shinyApp(
                     tags$div(
                         class = "custom-stacked-pickers",
                         style = "display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; width: 100%;",
-                        
-                        # If a picker is NULL, tags$div() creates an empty placeholder keeping the column structure intact
                         tags$div(day_picker),
                         tags$div(month_picker),
                         tags$div(year_picker)
@@ -350,9 +342,7 @@ app <- shinyApp(
             months <- month.name
             start_day_choices <- generate_day_choices(start_year, start_month)
             end_day_choices   <- generate_day_choices(end_year, end_month)
-
             
-            ## Set up pickers
             start_day_picker <- uiOutput("custom_start_day_picker_ui")
             start_month_picker <- f7Picker(
                 "custom_start_month", "Month", 
@@ -377,15 +367,12 @@ app <- shinyApp(
                 choices = years, scrollToInput = TRUE
             )
             
-            
-            ## Create two different 3x wheel date pickers
             tags$div(
                 tags$div(
                     tags$div("Start Date", style = date_picker_title_style),
                     tags$div(
                         class = "custom-stacked-pickers",
                         style = "display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; width: 100%;",
-    
                         tags$div(start_day_picker),
                         tags$div(start_month_picker),
                         tags$div(start_year_picker)
@@ -396,7 +383,6 @@ app <- shinyApp(
                     tags$div(
                         class = "custom-stacked-pickers",
                         style = "display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; width: 100%;",
-    
                         tags$div(end_day_picker),
                         tags$div(end_month_picker),
                         tags$div(end_year_picker)
@@ -406,13 +392,37 @@ app <- shinyApp(
         })
         
         
-        ## Update day options in pickers
+        
+        # Update user choice ONLY when user physically changes the day picker
+        # 1. State tracking for values and skip counters
+        saved_days <- reactiveValues(
+            dynamic = as.numeric(format(Sys.time(), "%d")), 
+            dynamic_target = as.numeric(format(Sys.time(), "%d")),
+            
+            custom_start = 1,
+            custom_start_target = 1,
+            
+            custom_end = as.numeric(format(Sys.time(), "%d")),
+            custom_end_target = as.numeric(format(Sys.time(), "%d"))
+        )
+        
+        # Counter to absorb server-initiated UI re-render echoes
+        skip_count <- reactiveValues(
+            dynamic = 1,
+            custom_start = 1,
+            custom_end = 1
+        )
+        
+        # 2. Observers: Only update target if event was NOT produced by a server re-render
         observeEvent(input$day_select, {
             if (!is.null(input$day_select) && input$day_select != "" && input$day_select != "NA") {
                 extracted <- as.numeric(stringr::str_extract(input$day_select, "\\d+"))
-                
-                # Break the infinite loop: only update if the value has actually changed
-                if (!is.na(extracted) && !isTRUE(all.equal(extracted, saved_days$dynamic))) {
+                if (!is.na(extracted)) {
+                    if (skip_count$dynamic > 0) {
+                        skip_count$dynamic <- skip_count$dynamic - 1  # Swallow the echo
+                    } else {
+                        saved_days$dynamic_target <- extracted       # True user scroll
+                    }
                     saved_days$dynamic <- extracted
                 }
             }
@@ -421,8 +431,12 @@ app <- shinyApp(
         observeEvent(input$custom_start_day, {
             if (!is.null(input$custom_start_day) && input$custom_start_day != "" && input$custom_start_day != "NA") {
                 extracted <- as.numeric(stringr::str_extract(input$custom_start_day, "\\d+"))
-                
-                if (!is.na(extracted) && !isTRUE(all.equal(extracted, saved_days$custom_start))) {
+                if (!is.na(extracted)) {
+                    if (skip_count$custom_start > 0) {
+                        skip_count$custom_start <- skip_count$custom_start - 1
+                    } else {
+                        saved_days$custom_start_target <- extracted
+                    }
                     saved_days$custom_start <- extracted
                 }
             }
@@ -431,64 +445,63 @@ app <- shinyApp(
         observeEvent(input$custom_end_day, {
             if (!is.null(input$custom_end_day) && input$custom_end_day != "" && input$custom_end_day != "NA") {
                 extracted <- as.numeric(stringr::str_extract(input$custom_end_day, "\\d+"))
-                
-                if (!is.na(extracted) && !isTRUE(all.equal(extracted, saved_days$custom_end))) {
+                if (!is.na(extracted)) {
+                    if (skip_count$custom_end > 0) {
+                        skip_count$custom_end <- skip_count$custom_end - 1
+                    } else {
+                        saved_days$custom_end_target <- extracted
+                    }
                     saved_days$custom_end <- extracted
                 }
             }
         })
         
-        
-        # 1. Dynamic "To Date" Day Picker
+        # 3. Render Blocks: Increment skip counter before rendering
         output$dynamic_day_picker_ui <- renderUI({
             req(input$month_select, input$year_select)
             new_choices <- generate_day_choices(input$year_select, input$month_select)
             
-            # ISOLATE the day: read the value, but don't re-render if it changes
-            current_day_num <- isolate(saved_days$dynamic)
-            max_day <- length(new_choices)
+            target_day <- isolate(saved_days$dynamic_target)
+            effective_day <- min(target_day, length(new_choices))
             
-            if (current_day_num > max_day) { current_day_num <- max_day }
+            # Queue 1 skip for the upcoming JS binding event
+            isolate({ skip_count$dynamic <- skip_count$dynamic + 1 })
             
             f7Picker(
                 "day_select", "Day", 
-                value = new_choices[current_day_num], 
+                value = new_choices[effective_day], 
                 choices = new_choices, scrollToInput = TRUE
             )
         })
         
-        # 2. Custom Start Day Picker
         output$custom_start_day_picker_ui <- renderUI({
             req(input$custom_start_month, input$custom_start_year)
             new_choices <- generate_day_choices(input$custom_start_year, input$custom_start_month)
             
-            # ISOLATE the day
-            current_day_num <- isolate(saved_days$custom_start)
-            max_day <- length(new_choices)
+            target_day <- isolate(saved_days$custom_start_target)
+            effective_day <- min(target_day, length(new_choices))
             
-            if (current_day_num > max_day) { current_day_num <- max_day }
+            isolate({ skip_count$custom_start <- skip_count$custom_start + 1 })
             
             f7Picker(
                 "custom_start_day", "Day", 
-                value = new_choices[current_day_num], 
+                value = new_choices[effective_day], 
                 choices = new_choices, scrollToInput = TRUE
             )
         })
         
-        # 3. Custom End Day Picker
         output$custom_end_day_picker_ui <- renderUI({
             req(input$custom_end_month, input$custom_end_year)
             new_choices <- generate_day_choices(input$custom_end_year, input$custom_end_month)
             
-            # ISOLATE the day
-            current_day_num <- isolate(saved_days$custom_end)
-            max_day <- length(new_choices)
+            target_day <- isolate(saved_days$custom_end_target)
+            effective_day <- min(target_day, length(new_choices))
             
-            if (current_day_num > max_day) { current_day_num <- max_day }
+            isolate({ skip_count$custom_end <- skip_count$custom_end + 1 })
             
             f7Picker(
                 "custom_end_day", "Day", 
-                value = new_choices[current_day_num], 
+                value = new_choices[effective_day], 
                 choices = new_choices, scrollToInput = TRUE
             )
         })
