@@ -6,8 +6,63 @@ library(lubridate)
 library(cachem)
 library(ggtext)
 library(stringr)
+library(jsonlite)
+library(httr)
+library(ggpattern)
+library(purrr)
 
 shinyOptions(cache = cache_disk("./app_cache", max_age = 86400))
+lastfm_api_key <- readLines("api_lastfm.key")
+spotify_client_id <- readLines("api_spotify.key")[1]
+spotify_client_secret <- readLines("api_spotify.key")[2]
+
+## Function for getting url
+get_image <- function(artist, album = NULL, track = NULL, size = 3) {
+    image <- NULL
+    if (!is.null(album)) {
+        album_url <- paste0(
+            "http://ws.audioscrobbler.com/2.0/?method=album.getInfo&api_key=", lastfm_api_key, 
+            "&artist=", str_replace_all(tolower(artist), " ", "+"), 
+            "&album=", str_replace_all(tolower(album), " ", "+"), "&format=json"
+        )
+        
+        album_json <- read_json(album_url)
+        image <- album_json[["album"]][["image"]][[size]][["#text"]]
+        
+    } else if (!is.null(track)) {
+        track_url <- paste0(
+            "http://ws.audioscrobbler.com/2.0/?method=track.getInfo&api_key=", lastfm_api_key, 
+            "&artist=", str_replace_all(tolower(artist), " ", "+"), 
+            "&track=", str_replace_all(tolower(track), " ", "+"), "&format=json"
+        )
+        
+        track_json <- read_json(track_url)
+        image <- track_json[["track"]][["album"]][["image"]][[size]][["#text"]]
+    }
+    
+    if ((is.null(album) & is.null(track)) | is.null(image)) {
+        ## Get artist image from spotify
+        auth_response <- POST(
+            url = "https://accounts.spotify.com/api/token",
+            body = list(grant_type = "client_credentials", client_id = spotify_client_id, client_secret = spotify_client_secret),
+            encode = "form"
+        )
+        
+        if (status_code(auth_response) != 200) {stop("Authentication failed. Check your credentials.")}
+        access_token <- content(auth_response)$access_token
+        
+        search_response <- content(GET(
+            url = "https://api.spotify.com/v1/search",
+            add_headers(Authorization = paste("Bearer", access_token)),
+            query = list(q = artist, type = "artist", limit = 1)
+        ))
+        
+        image <- search_response[["artists"]][["items"]][[1]][["images"]][[1]][["url"]]
+    }
+    
+    
+    return(image)
+}
 
 ## Function for putting persistent popups into UI
 customF7Popup <- function(id, title, ..., close_text = "Close") {
@@ -994,11 +1049,13 @@ app <- shinyApp(
             
             idx <- graph_rows()
             max_row <- min(idx[2], nrow(tracks_data))
-            plot_data <- tracks_data[idx[1]:max_row, ]
+            plot_data <- tracks_data[idx[1]:max_row, ] %>%
+                mutate(image_url = map2_chr(artist, track, ~ get_image(artist = .x, track = .y)))
+            
             date_range <- applied_date_range()
             
             ggplot(plot_data, aes(y = reorder(label, desc(rank)), x = plays)) +
-                geom_col() +
+                geom_col_pattern(aes(pattern_filename = image_url), pattern = "image", pattern_type = "fit") +
                 geom_text(aes(label = plays, hjust = text_hjust, col = as.character(is_short))) +
                 scale_colour_manual(values = c("TRUE" = text_outside_colour, "FALSE" = text_inside_colour)) +
                 coord_cartesian(xlim = c(0, NA), expand = FALSE) +
