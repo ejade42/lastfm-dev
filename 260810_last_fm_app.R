@@ -424,7 +424,8 @@ app <- shinyApp(
                         tags$div(week_to_day_picker),
                         tags$div(week_to_month_picker),
                         tags$div(week_to_year_picker)
-                    )
+                    ),
+                    tags$div("Lol I can't get these linked so it's just custom date selection again")
                 )
             )
         })
@@ -871,7 +872,12 @@ app <- shinyApp(
                 
                 "week"={
                     if (date_reference == "Calendar") {
-                        warning("Still need to do calendar weeks")
+                        sel_week_from <- extract_numeric_date(input$week_from_day, input$week_from_month, input$week_from_year)
+                        sel_week_to <- extract_numeric_date(input$week_to_day, input$week_to_month, input$week_to_year)
+                        c(
+                            sel_week_from,
+                            sel_week_to
+                        )
                     } else if (date_reference == "To today") {
                         c(
                             as_date(Sys.time() - days(6), tz = selected_timezone),
@@ -938,8 +944,8 @@ app <- shinyApp(
             
             partial_subset <- filter(
                 partial_subset,
-                as_date(datetime_utc, tz = input$selected_timezone) >= as_date(date_range[1]),
-                as_date(datetime_utc, tz = input$selected_timezone) <= as_date(date_range[2])
+                as_date(datetime_utc, tz = input$selected_timezone) >= as_date(min(date_range)),
+                as_date(datetime_utc, tz = input$selected_timezone) <= as_date(max(date_range))
             )
             
             partial_subset
