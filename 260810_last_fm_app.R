@@ -49,6 +49,13 @@ generate_day_choices <- function(year, month_name) {
     return(labels)
 }
 
+extract_numeric_date <- function(day_label, month_name, year) {
+    month_num <- sprintf("%02d", match(month_name, month.name))
+    day_num <- sprintf("%02d", as.numeric(stringr::str_extract(day_label, "\\d+")))
+    constructed_date <- paste0(year, "-", month_num, "-", day_num)
+    lubridate::as_date(constructed_date)
+}
+
 app <- shinyApp(
     ui = f7Page(
         tags$head(
@@ -670,11 +677,13 @@ app <- shinyApp(
                         as_date(max(full_data()$datetime_utc), tz = input$selected_timezone)
                     )
                 },
+                
+                
                 "year"={
                     if (input$date_reference == "Calendar") {
                         c(
-                            as_date(paste0(input$year_picker, "-01-01")),
-                            as_date(paste0(input$year_picker, "-12-31"))
+                            as_date(paste0(input$year_select, "-01-01")),
+                            as_date(paste0(input$year_select, "-12-31"))
                         )
                     } else if (input$date_reference == "To today") {
                         c(
@@ -682,11 +691,36 @@ app <- shinyApp(
                             as_date(Sys.time(), tz = input$selected_timezone)
                         )
                     } else if (input$date_reference == "To date") {
-                        
+                        sel_date <- extract_numeric_date(input$to_date_day_select, input$to_date_month_select, input$to_date_year_select)
+                        c(
+                            as_date(sel_date - years(1) + days(1), tz = input$selected_timezone),
+                            sel_date
+                        )
                     }
                 },
+                
+                
                 "month"={
-                    
+                    if (input$date_reference == "Calendar") {
+                        month_num <- sprintf("%02d", match(input$month_select, month.name))
+                        first_of_month <- as_date(paste0(input$year_select, "-", month_num, "-01"))
+                        days_this_month <- sprintf("%02d", days_in_month(first_of_month))
+                        c(
+                            first_of_month,
+                            as_date(paste0(input$year_select, "-", month_num, "-", days_this_month))
+                        )
+                    } else if (input$date_reference == "To today") {
+                        c(
+                            as_date(Sys.time() - months(1) + days(1), tz = input$selected_timezone),
+                            as_date(Sys.time(), tz = input$selected_timezone)
+                        )
+                    } else if (input$date_reference == "To date") {
+                        sel_date <- extract_numeric_date(input$to_date_day_select, input$to_date_month_select, input$to_date_year_select)
+                        c(
+                            as_date(sel_date - months(1) + days(1), tz = input$selected_timezone),
+                            sel_date
+                        )
+                    }
                 },
                 "week"={
                     
@@ -697,6 +731,12 @@ app <- shinyApp(
                 "custom"={
                     
                 }
+            )
+            
+            partial_subset <- filter(
+                partial_subset,
+                as_date(datetime_utc, tz = input$selected_timezone) >= as_date(date_range[1]),
+                as_date(datetime_utc, tz = input$selected_timezone) <= as_date(date_range[2])
             )
             
             partial_subset
