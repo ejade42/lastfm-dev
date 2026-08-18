@@ -14,12 +14,23 @@ library(memoise)
 library(shadowtext)
 
 shinyOptions(cache = cache_disk("./app_cache", max_age = 86400))
-image_cache <- cache_disk("./app_cache/images")
+image_cache <- cache_disk("./app_cache/images", max_age = 86400 * 30)
 
 
 lastfm_api_key <- readLines("api_lastfm.key")
 spotify_client_id <- readLines("api_spotify.key")[1]
 spotify_client_secret <- readLines("api_spotify.key")[2]
+
+get_spotify_token <- function(client_id, client_secret) {
+    auth_response <- POST(
+        url = "https://accounts.spotify.com/api/token",
+        body = list(grant_type = "client_credentials", client_id = client_id, client_secret = client_secret),
+        encode = "form"
+    )
+    if (status_code(auth_response) != 200) stop("Authentication failed.")
+    return(content(auth_response)$access_token)
+}
+get_spotify_token_cached <- memoise(get_spotify_token, cache = cache_mem(max_age = 3400))
 
 ## Function for getting url
 get_image <- function(artist, album = NULL, track = NULL, size = 3) {
@@ -47,14 +58,7 @@ get_image <- function(artist, album = NULL, track = NULL, size = 3) {
     
     if ((is.null(album) & is.null(track)) | is.null(image)) {
         ## Get artist image from spotify
-        auth_response <- POST(
-            url = "https://accounts.spotify.com/api/token",
-            body = list(grant_type = "client_credentials", client_id = spotify_client_id, client_secret = spotify_client_secret),
-            encode = "form"
-        )
-        
-        if (status_code(auth_response) != 200) {stop("Authentication failed. Check your credentials.")}
-        access_token <- content(auth_response)$access_token
+        access_token <- get_spotify_token_cached(spotify_client_id, spotify_client_secret)
         
         search_response <- content(GET(
             url = "https://api.spotify.com/v1/search",
@@ -1038,7 +1042,7 @@ app <- shinyApp(
             text_inside_colour <- "white"
             text_outside_colour <- "black"
             text_shadow_colour <- "black"
-            text_shadow_radius <- 0.1
+            text_inside_shadow_radius <- 0.1
             text_size <- 10
             
             
@@ -1055,7 +1059,8 @@ app <- shinyApp(
                     rank = row_number(),
                     label = paste0(rank, "\\. **", track, "**<br>", artist),
                     is_short = plays < (max_plays * text_outside_threshold),
-                    text_hjust = if_else(is_short, -text_outside_displacement, 1 + text_outside_displacement)
+                    text_hjust = if_else(is_short, -text_outside_displacement, 1 + text_outside_displacement),
+                    text_shadow_radius = ifelse(is_short, 0, text_inside_shadow_radius)
                 )
             
             req(nrow(tracks_data) > 0)
@@ -1069,11 +1074,12 @@ app <- shinyApp(
             
             ggplot(plot_data, aes(y = reorder(label, desc(rank)), x = plays)) +
                 geom_col_pattern(aes(pattern_filename = image_url), pattern = "image", pattern_type = "expand", col = col_outline_colour, linewidth = col_linewidth) +
-                geom_shadowtext(aes(label = plays, hjust = text_hjust, col = as.character(is_short)), 
-                                bg.colour = text_shadow_colour, bg.r = text_shadow_radius, size = text_size) +
+                geom_shadowtext(aes(label = plays, hjust = text_hjust, col = as.character(is_short), bg.r = text_shadow_radius), 
+                                bg.colour = text_shadow_colour, size = text_size) +
                 scale_colour_manual(values = c("TRUE" = text_outside_colour, "FALSE" = text_inside_colour)) +
                 scale_pattern_filename_identity() +
-                coord_cartesian(xlim = c(0, NA), expand = FALSE) +
+                scale_continuous_identity(aesthetics = "bg.r") +
+                coord_cartesian(xlim = c(0, NA), expand = FALSE, clip = "off") +
                 ggtitle(paste0(date_range[1], " to ", date_range[2])) +
                 theme_bw(base_size = base_size) +
                 theme(panel.grid.major.y = element_blank(),
@@ -1087,3 +1093,4 @@ app <- shinyApp(
 )
 
 app
+
