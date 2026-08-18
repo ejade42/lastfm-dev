@@ -319,7 +319,7 @@ app <- shinyApp(
             current_year    <- format(Sys.time(), "%Y", tz = input$selected_timezone)
             current_day_num <- format(Sys.time(), "%d", tz = input$selected_timezone) %>% as.numeric()
             
-            years <- as.character(unique(df$year))
+            years <- as.character(sort(unique(df$year)))
             months <- month.name
             initial_day_choices <- generate_day_choices(current_year, current_month)
             
@@ -369,7 +369,7 @@ app <- shinyApp(
             current_year    <- format(Sys.time(), "%Y", tz = input$selected_timezone)
             current_day_num <- format(Sys.time(), "%d", tz = input$selected_timezone) %>% as.numeric()
             
-            years <- as.character(unique(df$year))
+            years <- as.character(sort(unique(df$year)))
             months <- month.name
             initial_day_choices <- generate_day_choices(current_year, current_month)
             
@@ -412,7 +412,7 @@ app <- shinyApp(
             end_year     <- format(end_datetime, "%Y", tz = input$selected_timezone)
             end_day_num  <- format(end_datetime, "%d", tz = input$selected_timezone) %>% as.numeric()
             
-            years <- as.character(unique(df$year))
+            years <- as.character(sort(unique(df$year)))
             months <- month.name
             start_day_choices <- generate_day_choices(start_year, start_month)
             end_day_choices   <- generate_day_choices(end_year, end_month)
@@ -731,14 +731,42 @@ app <- shinyApp(
                         )
                     }
                 },
+                
+                
                 "week"={
                     
                 },
+                
+                
                 "day"={
-                    
+                    if (date_reference == "Calendar") {
+                        sel_date <- extract_numeric_date(input$day_select, input$month_select, input$year_select)
+                        c(
+                            sel_date,
+                            sel_date
+                        )
+                    } else if (date_reference == "To today") {
+                        c(
+                            as_date(Sys.time(), tz = selected_timezone),
+                            as_date(Sys.time(), tz = selected_timezone)
+                        )
+                    } else if (date_reference == "To date") {
+                        sel_date <- extract_numeric_date(input$to_date_day_select, input$to_date_month_select, input$to_date_year_select)
+                        c(
+                            sel_date,
+                            sel_date
+                        )
+                    }
                 },
+                
+                
                 "custom"={
-                    
+                    sel_start_date <- extract_numeric_date(input$custom_start_day, input$custom_start_month, input$custom_start_year)
+                    sel_end_date <- extract_numeric_date(input$custom_end_day, input$custom_end_month, input$custom_end_year)
+                    c(
+                        sel_start_date,
+                        sel_end_date
+                    )
                 }
             )
         }) %>% bindEvent(full_data(), input$btn_apply_date_filter, ignoreInit = FALSE)
