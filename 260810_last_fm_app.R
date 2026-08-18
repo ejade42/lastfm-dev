@@ -10,8 +10,13 @@ library(jsonlite)
 library(httr)
 library(ggpattern)
 library(purrr)
+library(memoise)
+library(shadowtext)
 
 shinyOptions(cache = cache_disk("./app_cache", max_age = 86400))
+image_cache <- cache_disk("./app_cache/images")
+
+
 lastfm_api_key <- readLines("api_lastfm.key")
 spotify_client_id <- readLines("api_spotify.key")[1]
 spotify_client_secret <- readLines("api_spotify.key")[2]
@@ -63,6 +68,7 @@ get_image <- function(artist, album = NULL, track = NULL, size = 3) {
     
     return(image)
 }
+get_image_cached <- memoise(get_image, cache = image_cache)
 
 ## Function for putting persistent popups into UI
 customF7Popup <- function(id, title, ..., close_text = "Close") {
@@ -1024,10 +1030,17 @@ app <- shinyApp(
             req(input$tabs == "Tracks")
             
             ## Make these configurable later
+            base_size <- 20
+            col_outline_colour <- "black"
+            col_linewidth <- 1
             text_outside_threshold <- 0.15
             text_outside_displacement <- 0.25
             text_inside_colour <- "white"
             text_outside_colour <- "black"
+            text_shadow_colour <- "black"
+            text_shadow_radius <- 0.1
+            text_size <- 10
+            
             
             ##### could we instead do the first group_by dynamically, so that we only need this code once for tracks / albums / artists?
             tracks_data <- subset_data() %>%
@@ -1042,7 +1055,7 @@ app <- shinyApp(
                     rank = row_number(),
                     label = paste0(rank, "\\. **", track, "**<br>", artist),
                     is_short = plays < (max_plays * text_outside_threshold),
-                    text_hjust = if_else(is_short, -text_outside_displacement, 1 + text_outside_displacement) 
+                    text_hjust = if_else(is_short, -text_outside_displacement, 1 + text_outside_displacement)
                 )
             
             req(nrow(tracks_data) > 0)
@@ -1050,17 +1063,19 @@ app <- shinyApp(
             idx <- graph_rows()
             max_row <- min(idx[2], nrow(tracks_data))
             plot_data <- tracks_data[idx[1]:max_row, ] %>%
-                mutate(image_url = map2_chr(artist, track, ~ get_image(artist = .x, track = .y)))
+                mutate(image_url = map2_chr(artist, track, ~ get_image_cached(artist = .x, track = .y, size = 4)))
             
             date_range <- applied_date_range()
             
             ggplot(plot_data, aes(y = reorder(label, desc(rank)), x = plays)) +
-                geom_col_pattern(aes(pattern_filename = image_url), pattern = "image", pattern_type = "fit") +
-                geom_text(aes(label = plays, hjust = text_hjust, col = as.character(is_short))) +
+                geom_col_pattern(aes(pattern_filename = image_url), pattern = "image", pattern_type = "expand", col = col_outline_colour, linewidth = col_linewidth) +
+                geom_shadowtext(aes(label = plays, hjust = text_hjust, col = as.character(is_short)), 
+                                bg.colour = text_shadow_colour, bg.r = text_shadow_radius, size = text_size) +
                 scale_colour_manual(values = c("TRUE" = text_outside_colour, "FALSE" = text_inside_colour)) +
+                scale_pattern_filename_identity() +
                 coord_cartesian(xlim = c(0, NA), expand = FALSE) +
                 ggtitle(paste0(date_range[1], " to ", date_range[2])) +
-                theme_bw(base_size = 20) +
+                theme_bw(base_size = base_size) +
                 theme(panel.grid.major.y = element_blank(),
                       panel.grid.minor.y = element_blank(),
                       axis.title = element_blank(),
