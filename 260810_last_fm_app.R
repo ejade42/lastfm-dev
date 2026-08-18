@@ -134,7 +134,10 @@ app <- shinyApp(
                 ),
                 
                 # Shows only when 'To date' is selected
-                
+                conditionalPanel(
+                    condition = "input.date_mode != 'custom' & input.date_mode != 'alltime' & input.date_reference == 'To date'",
+                    uiOutput("to_date_date_choices")
+                ),
                 
                 # Shows only when "Custom" is selected
                 conditionalPanel(
@@ -334,6 +337,44 @@ app <- shinyApp(
             }
         })
         
+        ## Create to-date date picker
+        output$to_date_date_choices <- renderUI({
+            df <- full_data()
+            req(is.data.frame(df), nrow(df) > 0)
+            mode <- input$date_mode
+            
+            current_month   <- format(Sys.time(), "%B", tz = input$selected_timezone)
+            current_year    <- format(Sys.time(), "%Y", tz = input$selected_timezone)
+            current_day_num <- format(Sys.time(), "%d", tz = input$selected_timezone) %>% as.numeric()
+            
+            years <- as.character(unique(df$year))
+            months <- month.name
+            initial_day_choices <- generate_day_choices(current_year, current_month)
+            
+            to_date_day_picker <- uiOutput("to_date_day_picker_ui")
+            to_date_month_picker <- f7Picker(
+                "to_date_month_select", "Month", 
+                value = format(Sys.time(), "%B", tz = input$selected_timezone), 
+                choices = months, scrollToInput = TRUE
+            )
+            to_date_year_picker <- f7Picker(
+                "to_date_year_select", "Year", 
+                value = format(Sys.time(), "%Y", tz = input$selected_timezone), 
+                choices = years, scrollToInput = TRUE
+            )
+            
+            tags$div(
+                tags$div(paste0(str_to_title(mode), " to:"), style = date_picker_title_style),
+                tags$div(
+                    class = "custom-stacked-pickers",
+                    style = "display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; width: 100%;",
+                    tags$div(to_date_day_picker),
+                    tags$div(to_date_month_picker),
+                    tags$div(to_date_year_picker)
+                )
+            )
+        })
+        
         ## Create custom date picker
         output$custom_date_choices <- renderUI({
             df <- full_data()
@@ -410,6 +451,9 @@ app <- shinyApp(
             dynamic = as.numeric(format(Sys.time(), "%d")), 
             dynamic_target = as.numeric(format(Sys.time(), "%d")),
             
+            to_date = as.numeric(format(Sys.time(), "%d")), 
+            to_date_target = as.numeric(format(Sys.time(), "%d")),
+            
             custom_start = 1,
             custom_start_target = 1,
             
@@ -420,6 +464,7 @@ app <- shinyApp(
         ## Counter to absorb server-initiated UI re-render echoes
         skip_count <- reactiveValues(
             dynamic = 1,
+            to_date = 1,
             custom_start = 1,
             custom_end = 1
         )
@@ -433,6 +478,20 @@ app <- shinyApp(
                         skip_count$dynamic <- skip_count$dynamic - 1  # Swallow the echo
                     } else {
                         saved_days$dynamic_target <- extracted       # True user scroll
+                    }
+                    saved_days$dynamic <- extracted
+                }
+            }
+        })
+        
+        observeEvent(input$to_date_day_select, {
+            if (!is.null(input$to_date_day_select) && input$to_date_day_select != "" && input$to_date_day_select != "NA") {
+                extracted <- as.numeric(stringr::str_extract(input$to_date_day_select, "\\d+"))
+                if (!is.na(extracted)) {
+                    if (skip_count$to_date > 0) {
+                        skip_count$to_date <- skip_count$to_date - 1
+                    } else {
+                        saved_days$to_date_target <- extracted
                     }
                     saved_days$dynamic <- extracted
                 }
@@ -480,6 +539,23 @@ app <- shinyApp(
             
             f7Picker(
                 "day_select", "Day", 
+                value = new_choices[effective_day], 
+                choices = new_choices, scrollToInput = TRUE
+            )
+        })
+        
+        output$to_date_day_picker_ui <- renderUI({
+            req(input$to_date_month_select, input$to_date_year_select)
+            new_choices <- generate_day_choices(input$to_date_year_select, input$to_date_month_select)
+            
+            target_day <- isolate(saved_days$to_date_target)
+            effective_day <- min(target_day, length(new_choices))
+            
+            # Queue 1 skip for the upcoming JS binding event
+            isolate({ skip_count$to_date <- skip_count$to_date + 1 })
+            
+            f7Picker(
+                "to_date_day_select", "Day", 
                 value = new_choices[effective_day], 
                 choices = new_choices, scrollToInput = TRUE
             )
@@ -597,8 +673,8 @@ app <- shinyApp(
                 "year"={
                     if (input$date_reference == "Calendar") {
                         c(
-                            as_date(paste0(input$year_picker, "-01-01"), tz = input$selected_timezone),
-                            as_date(paste0(input$year_picker, "-12-31"), tz = input$selected_timezone)
+                            as_date(paste0(input$year_picker, "-01-01")),
+                            as_date(paste0(input$year_picker, "-12-31"))
                         )
                     } else if (input$date_reference == "To today") {
                         c(
