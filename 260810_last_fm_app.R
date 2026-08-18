@@ -68,8 +68,8 @@ app <- shinyApp(
                 /* 1. Reduce the large outer margins of blocks and lists inside popups */
                 .popup .block, 
                 .popup .list {
-                    margin-top: 15px !important;
-                    margin-bottom: 15px !important;
+                    margin-top: 5px !important;
+                    margin-bottom: 5px !important;
                 }
 
                 /* 2. Reduce the minimum height and padding of list items (like f7SmartSelect and f7Select) */
@@ -81,6 +81,16 @@ app <- shinyApp(
                     min-height: 36px !important;
                     padding-top: 4px !important;
                     padding-bottom: 4px !important;
+                }
+                
+                #popup_subset .popup .list .item-content {
+                    min-height: 48px !important;
+                }
+                
+                #popup_subset .popup .list .item-inner {
+                    min-height: 36px !important;
+                    padding-top: 50px !important;
+                    padding-bottom: 50px !important;
                 }
 
                 /* 3. Tighten the space between conditionalPanels and standalone inputs */
@@ -106,6 +116,11 @@ app <- shinyApp(
             "popup_date",
             "Select Time Period",
             f7Block(
+                tags$div(
+                    style = "margin-top: 0px;",
+                    f7Button("btn_apply_date_filter", "Apply Date Filter", fill = TRUE)
+                ),
+                
                 f7SmartSelect(
                     "selected_timezone",
                     label = "Time zone",
@@ -655,45 +670,39 @@ app <- shinyApp(
         
         ## PERFORM ACTUAL DATA SUBSETTING
         ## ---------------------------------------------------------------------
-        subset_data <- reactive({
-            partial_subset <- full_data()
-            ## Subsetting artist / track / album
-            if (isTruthy(input$subset_artist)) {
-                partial_subset <- filter(partial_subset, tolower(artist) == tolower(input$subset_artist))
-            }
-            if (isTruthy(input$subset_album)) {
-                partial_subset <- filter(partial_subset, tolower(album) == tolower(input$subset_album))
-            }
-            if (isTruthy(input$subset_track)) {
-                partial_subset <- filter(partial_subset, tolower(track) == tolower(input$subset_track))
-            }
+        applied_date_range <- reactive({
+            df <- full_data()
+            req(is.data.frame(df), nrow(df) > 0)
             
-            ## Subsetting date - Inclusive at both ends
-            date_range <- switch(
+            mode              <- input$date_mode %||% "alltime"
+            selected_timezone <- input$selected_timezone %||% Sys.timezone()
+            date_reference    <- input$date_reference %||% "To today"
+            
+            switch(
                 input$date_mode,
                 "alltime"={
                     c(
-                        as_date(min(full_data()$datetime_utc), tz = input$selected_timezone),
-                        as_date(max(full_data()$datetime_utc), tz = input$selected_timezone)
+                        as_date(min(df$datetime_utc), tz = selected_timezone),
+                        as_date(max(df$datetime_utc), tz = selected_timezone)
                     )
                 },
                 
                 
                 "year"={
-                    if (input$date_reference == "Calendar") {
+                    if (date_reference == "Calendar") {
                         c(
                             as_date(paste0(input$year_select, "-01-01")),
                             as_date(paste0(input$year_select, "-12-31"))
                         )
-                    } else if (input$date_reference == "To today") {
+                    } else if (date_reference == "To today") {
                         c(
-                            as_date(Sys.time() - years(1) + days(1), tz = input$selected_timezone),
-                            as_date(Sys.time(), tz = input$selected_timezone)
+                            as_date(Sys.time() - years(1) + days(1), tz = selected_timezone),
+                            as_date(Sys.time(), tz = selected_timezone)
                         )
-                    } else if (input$date_reference == "To date") {
+                    } else if (date_reference == "To date") {
                         sel_date <- extract_numeric_date(input$to_date_day_select, input$to_date_month_select, input$to_date_year_select)
                         c(
-                            as_date(sel_date - years(1) + days(1), tz = input$selected_timezone),
+                            as_date(sel_date - years(1) + days(1), tz = selected_timezone),
                             sel_date
                         )
                     }
@@ -701,7 +710,7 @@ app <- shinyApp(
                 
                 
                 "month"={
-                    if (input$date_reference == "Calendar") {
+                    if (date_reference == "Calendar") {
                         month_num <- sprintf("%02d", match(input$month_select, month.name))
                         first_of_month <- as_date(paste0(input$year_select, "-", month_num, "-01"))
                         days_this_month <- sprintf("%02d", days_in_month(first_of_month))
@@ -709,15 +718,15 @@ app <- shinyApp(
                             first_of_month,
                             as_date(paste0(input$year_select, "-", month_num, "-", days_this_month))
                         )
-                    } else if (input$date_reference == "To today") {
+                    } else if (date_reference == "To today") {
                         c(
-                            as_date(Sys.time() - months(1) + days(1), tz = input$selected_timezone),
-                            as_date(Sys.time(), tz = input$selected_timezone)
+                            as_date(Sys.time() - months(1) + days(1), tz = selected_timezone),
+                            as_date(Sys.time(), tz = selected_timezone)
                         )
-                    } else if (input$date_reference == "To date") {
+                    } else if (date_reference == "To date") {
                         sel_date <- extract_numeric_date(input$to_date_day_select, input$to_date_month_select, input$to_date_year_select)
                         c(
-                            as_date(sel_date - months(1) + days(1), tz = input$selected_timezone),
+                            as_date(sel_date - months(1) + days(1), tz = selected_timezone),
                             sel_date
                         )
                     }
@@ -732,6 +741,23 @@ app <- shinyApp(
                     
                 }
             )
+        }) %>% bindEvent(full_data(), input$btn_apply_date_filter, ignoreInit = FALSE)
+        
+        subset_data <- reactive({
+            partial_subset <- full_data()
+            ## Subsetting artist / track / album
+            if (isTruthy(input$subset_artist)) {
+                partial_subset <- filter(partial_subset, tolower(artist) == tolower(input$subset_artist))
+            }
+            if (isTruthy(input$subset_album)) {
+                partial_subset <- filter(partial_subset, tolower(album) == tolower(input$subset_album))
+            }
+            if (isTruthy(input$subset_track)) {
+                partial_subset <- filter(partial_subset, tolower(track) == tolower(input$subset_track))
+            }
+            
+            ## Subsetting date - Inclusive at both ends
+            date_range <- applied_date_range()
             
             partial_subset <- filter(
                 partial_subset,
@@ -786,12 +812,14 @@ app <- shinyApp(
             idx <- graph_rows()
             max_row <- min(idx[2], nrow(tracks_data))
             plot_data <- tracks_data[idx[1]:max_row, ]
+            date_range <- applied_date_range()
             
             ggplot(plot_data, aes(y = reorder(label, desc(rank)), x = plays)) +
                 geom_col() +
                 geom_text(aes(label = plays, hjust = text_hjust, col = as.character(is_short))) +
                 scale_colour_manual(values = c("TRUE" = text_outside_colour, "FALSE" = text_inside_colour)) +
                 coord_cartesian(xlim = c(0, NA), expand = FALSE) +
+                ggtitle(paste0(date_range[1], " to ", date_range[2])) +
                 theme_bw(base_size = 20) +
                 theme(panel.grid.major.y = element_blank(),
                       panel.grid.minor.y = element_blank(),
