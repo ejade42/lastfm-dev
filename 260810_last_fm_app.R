@@ -1041,8 +1041,9 @@ app <- shinyApp(
             text_outside_displacement <- 0.25
             text_inside_colour <- "white"
             text_outside_colour <- "black"
-            text_shadow_colour <- "black"
-            text_inside_shadow_radius <- 0.1
+            text_inside_shadow_colour <- "black"
+            text_outside_shadow_alpha <- 0
+            text_shadow_radius <- 0.1
             text_size <- 10
             
             
@@ -1059,8 +1060,7 @@ app <- shinyApp(
                     rank = row_number(),
                     label = paste0(rank, "\\. **", track, "**<br>", artist),
                     is_short = plays < (max_plays * text_outside_threshold),
-                    text_hjust = if_else(is_short, -text_outside_displacement, 1 + text_outside_displacement),
-                    text_shadow_radius = ifelse(is_short, 0, text_inside_shadow_radius)
+                    text_hjust = if_else(is_short, -text_outside_displacement, 1 + text_outside_displacement)
                 )
             
             req(nrow(tracks_data) > 0)
@@ -1074,11 +1074,11 @@ app <- shinyApp(
             
             ggplot(plot_data, aes(y = reorder(label, desc(rank)), x = plays)) +
                 geom_col_pattern(aes(pattern_filename = image_url), pattern = "image", pattern_type = "expand", col = col_outline_colour, linewidth = col_linewidth) +
-                geom_shadowtext(aes(label = plays, hjust = text_hjust, col = as.character(is_short), bg.r = text_shadow_radius), 
-                                bg.colour = text_shadow_colour, size = text_size) +
+                geom_shadowtext(aes(label = plays, hjust = text_hjust, col = as.character(is_short), bg.colour = as.character(is_short)), 
+                                bg.r = text_shadow_radius, size = text_size) +
                 scale_colour_manual(values = c("TRUE" = text_outside_colour, "FALSE" = text_inside_colour)) +
+                scale_discrete_manual(aesthetics = "bg.colour", values = c("TRUE" = alpha(text_inside_shadow_colour, text_outside_shadow_alpha), "FALSE" = text_inside_shadow_colour)) +
                 scale_pattern_filename_identity() +
-                scale_continuous_identity(aesthetics = "bg.r") +
                 coord_cartesian(xlim = c(0, NA), expand = FALSE, clip = "off") +
                 ggtitle(paste0(date_range[1], " to ", date_range[2])) +
                 theme_bw(base_size = base_size) +
@@ -1086,7 +1086,7 @@ app <- shinyApp(
                       panel.grid.minor.y = element_blank(),
                       axis.title = element_blank(),
                       axis.text.y = element_markdown()) +
-                guides(col = "none")
+                guides(col = "none", bg.colour = "none")
         })
         ## ---------------------------------------------------------------------
     }
