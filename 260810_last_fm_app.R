@@ -276,17 +276,21 @@ app <- shinyApp(
             "popup_settings",
             "Plot settings",
             f7Block(
-                f7Stepper("plot_start", "Starting Rank (e.g., 1st)", min = 1, max = 100, value = 1, manual = TRUE, decimalPoint = 0),
+                tags$div(
+                    style = "margin-top: 0px;",
+                    f7Button("btn_apply_plot_settings", "Apply Plot Settings", fill = TRUE)
+                ),
+                f7Stepper("plot_start", "Starting Rank (e.g., 1st)", min = 1, max = 10000, value = 1, manual = TRUE, decimalPoint = 0),
                 f7Stepper("plot_count", "How many bars to show", min = 5, max = 50, value = 10, step = 5, manual = TRUE, decimalPoint = 0),
                 f7Stepper("plot_base_size", "Plot base size", min = 5, max = 50, value = 20, step = 1, manual = TRUE, decimalPoint = 0),
-                f7Stepper("plot_text_size", "Number text size", min = 0, max = 25, value = 10, step = 2.5, manual = TRUE, decimalPoint = 1),
-                f7ColorPicker("plot_col_outline_colour", "Bar outline colour", value = "#000000"),
-                f7Stepper("plot_col_linewidth", "Bar outline linewidth", min = 0, max = 3, value = 1, step = 0.25, manual = TRUE, decimalPoint = 2),
+                f7Stepper("plot_text_size", "Number text size", min = 0, max = 25, value = 10, step = 1, manual = TRUE, decimalPoint = 1),
+                f7ColorPicker("plot_col_outline_colour", "Bar outline colour", value = "#000000", modules = c("wheel", "hex")),
+                f7Stepper("plot_col_linewidth", "Bar outline linewidth", min = 0, max = 3, value = 1, step = 0.1, manual = TRUE, decimalPoint = 1),
                 f7Stepper("plot_text_outside_threshold", "Threshold for text being outside", min = 0, max = 1, value = 0.15, step = 0.05, manual = TRUE, decimalPoint = 2),
                 f7Stepper("plot_text_displacement", "Horizotnal text displacement", min = 0, max = 1, value = 0.25, step = 0.05, manual = TRUE, decimalPoint = 2),
-                f7ColorPicker("plot_text_inside_colour", "Inside text colour", value = "#FFFFFF"),
-                f7ColorPicker("plot_text_outside_colour", "Outside text colour", value = "#000000"),
-                f7ColorPicker("plot_text_shadow_colour", "Text shadow colour", value = "#000000"),
+                f7ColorPicker("plot_text_inside_colour", "Inside text colour", value = "#FFFFFF", modules = c("wheel", "hex")),
+                f7ColorPicker("plot_text_outside_colour", "Outside text colour", value = "#000000", modules = c("wheel", "hex")),
+                f7ColorPicker("plot_text_shadow_colour", "Text shadow colour", value = "#000000", modules = c("wheel", "hex")),
                 f7Stepper("plot_text_shadow_radius", "Text shadow radius", min = 0, max = 1, value = 0.1, step = 0.05, manual = TRUE, decimalPoint = 2),
                 f7Stepper("plot_text_outside_shadow_alpha", "Outside text shadow alpha", min = 0, max = 1, value = 0, step = 0.05, manual = TRUE, decimalPoint = 2)
             )
@@ -1033,6 +1037,23 @@ app <- shinyApp(
             )
         }) %>% bindEvent(full_data(), input$btn_apply_date_filter, ignoreInit = FALSE)
         
+        plot_settings <- reactive({
+            list(
+                base_size = input$plot_base_size,
+                text_size = input$plot_text_size,
+                col_outline_colour = input$plot_col_outline_colour$hex,
+                col_linewidth = input$plot_col_linewidth,
+                text_outside_threshold = input$plot_text_outside_threshold,
+                text_displacement = input$plot_text_displacement,
+                text_inside_colour = input$plot_text_inside_colour$hex,
+                text_outside_colour = input$plot_text_outside_colour$hex,
+                text_shadow_colour = input$plot_text_shadow_colour$hex,
+                text_outside_shadow_alpha = input$plot_text_outside_shadow_alpha,
+                text_shadow_radius = input$plot_text_shadow_radius,
+                graph_rows = c(input$plot_start, input$plot_start + input$plot_count - 1)
+            )
+        }) %>% bindEvent(full_data(), input$btn_apply_plot_settings, ignoreInit = FALSE)
+        
         subset_data <- reactive({
             partial_subset <- full_data()
             ## Subsetting artist / track / album
@@ -1065,28 +1086,12 @@ app <- shinyApp(
         
         ## GRAPHING
         ## ---------------------------------------------------------------------
-        ## Read settings to get subset to graph
-        graph_rows <- reactive({
-            req(input$plot_start, input$plot_count)
-            c(input$plot_start, input$plot_start + input$plot_count - 1)
-        })
-        
         ## Create graph
         output$tracks_graph <- renderPlot({
             req(input$tabs == "Tracks")
             
             ## Make these configurable later
-            base_size <- input$plot_base_size
-            text_size <- input$plot_text_size
-            col_outline_colour <- input$plot_col_outline_colour$hex
-            col_linewidth <- input$plot_col_linewidth
-            text_outside_threshold <- input$plot_text_outside_threshold
-            text_displacement <- input$plot_text_displacement
-            text_inside_colour <- input$plot_text_inside_colour$hex
-            text_outside_colour <- input$plot_text_outside_colour$hex
-            text_shadow_colour <- input$plot_text_shadow_colour$hex
-            text_outside_shadow_alpha <- input$plot_text_outside_shadow_alpha
-            text_shadow_radius <- input$plot_text_shadow_radius
+            active_plot_settings <- plot_settings()
             
             
             ##### could we instead do the first group_by dynamically, so that we only need this code once for tracks / albums / artists?
@@ -1102,13 +1107,13 @@ app <- shinyApp(
                 mutate(
                     rank = row_number(),
                     label = paste0(rank, "\\. **", track, "**<br>", artist),
-                    is_short = plays < (max_plays * text_outside_threshold),
-                    text_hjust = if_else(is_short, -text_displacement, 1 + text_displacement)
+                    is_short = plays < (max_plays * active_plot_settings$text_outside_threshold),
+                    text_hjust = if_else(is_short, -active_plot_settings$text_displacement, 1 + active_plot_settings$text_displacement)
                 )
             
             req(nrow(tracks_data) > 0)
             
-            idx <- graph_rows()
+            idx <- active_plot_settings$graph_rows
             max_row <- min(idx[2], nrow(tracks_data))
             plot_data <- tracks_data[idx[1]:max_row, ] %>%
                 mutate(image_url = map2_chr(artist, track, ~ get_image(artist = .x, track = .y, size = 4)))
@@ -1116,19 +1121,23 @@ app <- shinyApp(
             date_range <- applied_date_range()
             
             ggplot(plot_data, aes(y = reorder(label, desc(rank)), x = plays)) +
-                geom_col_pattern(aes(pattern_filename = image_url), pattern = "image", pattern_type = "expand", col = col_outline_colour, linewidth = col_linewidth) +
+                geom_col_pattern(aes(pattern_filename = image_url), pattern = "image", pattern_type = "expand", col = active_plot_settings$col_outline_colour, linewidth = active_plot_settings$col_linewidth) +
                 geom_shadowtext(aes(label = plays, hjust = text_hjust, col = as.character(is_short), bg.colour = as.character(is_short)), 
-                                bg.r = text_shadow_radius, size = text_size) +
-                scale_colour_manual(values = c("TRUE" = text_outside_colour, "FALSE" = text_inside_colour)) +
-                scale_discrete_manual(aesthetics = "bg.colour", values = c("TRUE" = alpha(text_shadow_colour, text_outside_shadow_alpha), "FALSE" = text_shadow_colour)) +
+                                bg.r = active_plot_settings$text_shadow_radius, size = active_plot_settings$text_size) +
+                scale_colour_manual(values = c("TRUE" = active_plot_settings$text_outside_colour, "FALSE" = active_plot_settings$text_inside_colour)) +
+                scale_discrete_manual(aesthetics = "bg.colour", values = c("TRUE" = alpha(active_plot_settings$text_shadow_colour, active_plot_settings$text_outside_shadow_alpha), "FALSE" = active_plot_settings$text_shadow_colour)) +
                 scale_pattern_filename_identity() +
                 coord_cartesian(xlim = c(0, NA), expand = FALSE, clip = "off") +
                 ggtitle(paste0(date_range[1], " to ", date_range[2])) +
-                theme_bw(base_size = base_size) +
+                theme_classic(base_size = active_plot_settings$base_size) +
                 theme(panel.grid.major.y = element_blank(),
                       panel.grid.minor.y = element_blank(),
+                      panel.border = element_blank(),
                       axis.title = element_blank(),
-                      axis.text.y = element_markdown()) +
+                      axis.text.y = element_markdown(),
+                      axis.ticks = element_blank(),
+                      axis.line = element_blank(),
+                      axis.text.x = element_blank()) +
                 guides(col = "none", bg.colour = "none")
         })
         ## ---------------------------------------------------------------------
