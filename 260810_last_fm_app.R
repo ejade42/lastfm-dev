@@ -14,7 +14,7 @@ library(memoise)
 library(shadowtext)
 
 ## option for printing lots of debugging statements
-verbose <- TRUE
+verbose <- FALSE
 
 shinyOptions(cache = cache_disk("./app_cache", max_age = 86400))
 ## do NOT end in a slash
@@ -57,25 +57,34 @@ get_image <- function(artist, album = NULL, track = NULL, size = 4) {
         return(local_filename)
     }
     
-    
     if (!is.null(album)) {
-        album_url <- paste0(
-            "http://ws.audioscrobbler.com/2.0/?method=album.getInfo&api_key=", lastfm_api_key, 
-            "&artist=", str_replace_all(tolower(artist), " ", "+"), 
-            "&album=", str_replace_all(tolower(album), " ", "+"), "&format=json"
+        album_res <- httr::GET(
+            url = "http://ws.audioscrobbler.com/2.0/",
+            query = list(
+                method  = "album.getInfo",
+                api_key = lastfm_api_key,
+                artist  = artist,
+                album   = album,
+                format  = "json"
+            )
         )
         
-        album_json <- read_json(album_url)
+        album_json <- httr::content(album_res)
         image <- album_json[["album"]][["image"]][[size]][["#text"]]
         
     } else if (!is.null(track)) {
-        track_url <- paste0(
-            "http://ws.audioscrobbler.com/2.0/?method=track.getInfo&api_key=", lastfm_api_key, 
-            "&artist=", str_replace_all(tolower(artist), " ", "+"), 
-            "&track=", str_replace_all(tolower(track), " ", "+"), "&format=json"
+        track_res <- httr::GET(
+            url = "http://ws.audioscrobbler.com/2.0/",
+            query = list(
+                method  = "track.getInfo",
+                api_key = lastfm_api_key,
+                artist  = artist,
+                track   = track,
+                format  = "json"
+            )
         )
         
-        track_json <- read_json(track_url)
+        track_json <- httr::content(track_res)
         image <- track_json[["track"]][["album"]][["image"]][[size]][["#text"]]
     }
     
@@ -92,10 +101,8 @@ get_image <- function(artist, album = NULL, track = NULL, size = 4) {
         image <- search_response[["artists"]][["items"]][[1]][["images"]][[1]][["url"]]
     }
     
-    
     if (!is.null(image) && image != "") {
         tryCatch({
-            
             download.file(url = image, destfile = local_filename, mode = "wb", quiet = TRUE)
             return(local_filename)
         }, error = function(e) {
@@ -1153,7 +1160,11 @@ app <- shinyApp(
             
             if (verbose) {print(plot_data)}
             
-            # 6. Generate the plot
+            # 6. Generate titles
+            left_title <- stringr::str_to_title(entity)
+            right_title <- paste0(date_range[1], " to ", date_range[2])
+            
+            # 7. Generate the plot
             ggplot(plot_data, aes(y = reorder(label, desc(rank)), x = plays)) +
                 geom_col_pattern(aes(pattern_filename = image_url), pattern = "image", pattern_type = "expand", col = settings$col_outline_colour, linewidth = settings$col_linewidth) +
                 geom_shadowtext(aes(label = plays, hjust = text_hjust, col = as.character(is_short), bg.colour = as.character(is_short)), 
@@ -1162,9 +1173,12 @@ app <- shinyApp(
                 scale_discrete_manual(aesthetics = "bg.colour", values = c("TRUE" = alpha(settings$text_shadow_colour, settings$text_outside_shadow_alpha), "FALSE" = settings$text_shadow_colour)) +
                 scale_pattern_filename_identity() +
                 coord_cartesian(xlim = c(0, NA), expand = FALSE, clip = "off") +
-                ggtitle(paste0(date_range[1], " to ", date_range[2])) +
+                labs(title = left_title, tag = right_title) +
                 theme_classic(base_size = settings$base_size) +
-                theme(panel.grid.major.y = element_blank(),
+                theme(plot.title = element_text(face = "bold"),
+                      plot.tag.position = c(1, 1),
+                      plot.tag = element_text(size = rel(1.2), hjust = 1, vjust = 1),
+                      panel.grid.major.y = element_blank(),
                       panel.grid.minor.y = element_blank(),
                       panel.border = element_blank(),
                       axis.title = element_blank(),
