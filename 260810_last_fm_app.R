@@ -14,7 +14,7 @@ library(memoise)
 library(shadowtext)
 
 ## option for printing lots of debugging statements
-verbose <- FALSE
+verbose <- TRUE
 
 shinyOptions(cache = cache_disk("./app_cache", max_age = 86400))
 ## do NOT end in a slash
@@ -349,14 +349,14 @@ app <- shinyApp(
                     title = "Artists",
                     tabName = "Artists",
                     icon = f7Icon("person_circle"),
-                    f7Block("artists graph")
+                    f7Block(plotOutput("artists_graph", width = "100%", height = "calc(100vh - 250px)"))
                 ),
                 
                 f7Tab(
                     title = "Albums",
                     tabName = "Albums",
                     icon = f7Icon("music_albums"),
-                    f7Block("albums graph")
+                    f7Block(plotOutput("albums_graph", width = "100%", height = "calc(100vh - 250px)"))
                 ),
                 
                 f7Tab(
@@ -1097,50 +1097,73 @@ app <- shinyApp(
         
         ## GRAPHING
         ## ---------------------------------------------------------------------
-        ## Create graph
-        output$tracks_graph <- renderPlot({
-            req(input$tabs == "Tracks")
+        ## Reusable graph function
+        generate_entity_plot <- function(data, entity, settings, date_range) {
             
-            ## Make these configurable later
-            active_plot_settings <- plot_settings()
+            # 1. Dynamically select grouping columns
+            group_cols <- if (entity == "artist") {
+                "artist"
+            } else if (entity == "album") {
+                c("artist", "album")
+            } else {
+                c("artist", "track") # Default to track
+            }
             
-            
-            ##### could we instead do the first group_by dynamically, so that we only need this code once for tracks / albums / artists?
-            tracks_data <- subset_data() %>%
-                group_by(artist, track) %>%
+            # 2. Group and summarize
+            entity_data <- data %>%
+                group_by(across(all_of(group_cols))) %>%
                 summarise(plays = n(), .groups = "drop") %>%
-                arrange(desc(plays), track)
+                arrange(desc(plays), .data[[entity]])
             
-
-            max_plays <- ifelse(length(tracks_data$plays) > 0, max(tracks_data$plays), 0)
+            max_plays <- ifelse(nrow(entity_data) > 0, max(entity_data$plays), 0)
             
-            tracks_data <- tracks_data %>%
+            # 3. Format dynamic labels based on the entity
+            entity_data <- entity_data %>%
                 mutate(
                     rank = row_number(),
-                    label = paste0(rank, "\\. **", track, "**<br>", artist),
-                    is_short = plays < (max_plays * active_plot_settings$text_outside_threshold),
-                    text_hjust = if_else(is_short, -active_plot_settings$text_displacement, 1 + active_plot_settings$text_displacement)
+                    label = if (entity == "artist") {
+                        paste0(rank, "\\. **", artist, "**")
+                    } else {
+                        paste0(rank, "\\. **", .data[[entity]], "**<br>", artist)
+                    },
+                    is_short = plays < (max_plays * settings$text_outside_threshold),
+                    text_hjust = if_else(is_short, -settings$text_displacement, 1 + settings$text_displacement)
                 )
             
-            req(nrow(tracks_data) > 0)
+            req(nrow(entity_data) > 0)
             
-            idx <- active_plot_settings$graph_rows
-            max_row <- min(idx[2], nrow(tracks_data))
-            plot_data <- tracks_data[idx[1]:max_row, ] %>%
-                mutate(image_url = map2_chr(artist, track, ~ get_image(artist = .x, track = .y, size = 4)))
+            # 4. Filter to desired graph rows
+            idx <- settings$graph_rows
+            max_row <- min(idx[2], nrow(entity_data))
+            plot_data <- entity_data[idx[1]:max_row, ] 
             
-            date_range <- applied_date_range()
+            # 5. Dynamically fetch images based on the entity
+            fallback_image <- "fallback_image.jpg"
             
+            plot_data <- plot_data %>%
+                mutate(
+                    image_url = switch(
+                        entity,
+                        "artist" = map_chr(artist, ~ get_image(artist = .x, size = 4)),
+                        "album"  = map2_chr(artist, album, ~ get_image(artist = .x, album = .y, size = 4)),
+                        "track"  = map2_chr(artist, track, ~ get_image(artist = .x, track = .y, size = 4))
+                    ),
+                    image_url = if_else(is.na(image_url) | image_url == "", fallback_image, image_url)
+                )
+            
+            if (verbose) {print(plot_data)}
+            
+            # 6. Generate the plot
             ggplot(plot_data, aes(y = reorder(label, desc(rank)), x = plays)) +
-                geom_col_pattern(aes(pattern_filename = image_url), pattern = "image", pattern_type = "expand", col = active_plot_settings$col_outline_colour, linewidth = active_plot_settings$col_linewidth) +
+                geom_col_pattern(aes(pattern_filename = image_url), pattern = "image", pattern_type = "expand", col = settings$col_outline_colour, linewidth = settings$col_linewidth) +
                 geom_shadowtext(aes(label = plays, hjust = text_hjust, col = as.character(is_short), bg.colour = as.character(is_short)), 
-                                bg.r = active_plot_settings$text_shadow_radius, size = active_plot_settings$text_size) +
-                scale_colour_manual(values = c("TRUE" = active_plot_settings$text_outside_colour, "FALSE" = active_plot_settings$text_inside_colour)) +
-                scale_discrete_manual(aesthetics = "bg.colour", values = c("TRUE" = alpha(active_plot_settings$text_shadow_colour, active_plot_settings$text_outside_shadow_alpha), "FALSE" = active_plot_settings$text_shadow_colour)) +
+                                bg.r = settings$text_shadow_radius, size = settings$text_size) +
+                scale_colour_manual(values = c("TRUE" = settings$text_outside_colour, "FALSE" = settings$text_inside_colour)) +
+                scale_discrete_manual(aesthetics = "bg.colour", values = c("TRUE" = alpha(settings$text_shadow_colour, settings$text_outside_shadow_alpha), "FALSE" = settings$text_shadow_colour)) +
                 scale_pattern_filename_identity() +
                 coord_cartesian(xlim = c(0, NA), expand = FALSE, clip = "off") +
                 ggtitle(paste0(date_range[1], " to ", date_range[2])) +
-                theme_classic(base_size = active_plot_settings$base_size) +
+                theme_classic(base_size = settings$base_size) +
                 theme(panel.grid.major.y = element_blank(),
                       panel.grid.minor.y = element_blank(),
                       panel.border = element_blank(),
@@ -1150,6 +1173,38 @@ app <- shinyApp(
                       axis.line = element_blank(),
                       axis.text.x = element_blank()) +
                 guides(col = "none", bg.colour = "none")
+        }
+        
+        
+        ## The three actual outputs
+        output$tracks_graph <- renderPlot({
+            req(input$tabs == "Tracks")
+            generate_entity_plot(
+                data = subset_data(), 
+                entity = "track", 
+                settings = plot_settings(), 
+                date_range = applied_date_range()
+            )
+        })
+        
+        output$albums_graph <- renderPlot({
+            req(input$tabs == "Albums")
+            generate_entity_plot(
+                data = subset_data(), 
+                entity = "album", 
+                settings = plot_settings(), 
+                date_range = applied_date_range()
+            )
+        })
+        
+        output$artists_graph <- renderPlot({
+            req(input$tabs == "Artists")
+            generate_entity_plot(
+                data = subset_data(), 
+                entity = "artist", 
+                settings = plot_settings(), 
+                date_range = applied_date_range()
+            )
         })
         ## ---------------------------------------------------------------------
     }
