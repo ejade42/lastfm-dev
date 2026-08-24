@@ -132,6 +132,23 @@ customF7Popup <- function(id, title, ..., close_text = "Close") {
     )
 }
 
+## Function for nice appearance of settings rows
+settings_row <- function(title, control) {
+    div(
+        class = "settings-row",
+        style = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid #333333; padding-bottom: 10px;",
+        div(style = "flex: 1; text-align: left; padding-right: 15px; font-weight: 500;", title),
+        div(style = "flex-shrink: 0;", control)
+    )
+}
+
+apply_settings_button <- function(id, name) {
+    div(
+        style = "margin-top: -50px; margin-bottom: 15px;",
+        f7Button(id, name, fill = TRUE),
+    )
+}
+
 generate_day_choices <- function(year, month_name) {
     month_num <- match(month_name, month.name)
     first_day <- as.Date(paste(year, month_num, "01", sep = "-"))
@@ -213,10 +230,7 @@ app <- shinyApp(
             "popup_date",
             "Select Time Period",
             f7Block(
-                tags$div(
-                    style = "margin-top: 0px;",
-                    f7Button("btn_apply_date_filter", "Apply Date Filter", fill = TRUE)
-                ),
+                apply_settings_button("btn_apply_date_filter", "Apply Date Filter"),
                 
                 f7SmartSelect(
                     "selected_timezone",
@@ -276,23 +290,20 @@ app <- shinyApp(
             "popup_settings",
             "Plot settings",
             f7Block(
-                tags$div(
-                    style = "margin-top: 0px;",
-                    f7Button("btn_apply_plot_settings", "Apply Plot Settings", fill = TRUE)
-                ),
-                f7Stepper("plot_start", "Starting Rank (e.g., 1st)", min = 1, max = 10000, value = 1, manual = TRUE, decimalPoint = 0),
-                f7Stepper("plot_count", "How many bars to show", min = 5, max = 50, value = 10, step = 5, manual = TRUE, decimalPoint = 0),
-                f7Stepper("plot_base_size", "Plot base size", min = 5, max = 50, value = 20, step = 1, manual = TRUE, decimalPoint = 0),
-                f7Stepper("plot_text_size", "Number text size", min = 0, max = 25, value = 10, step = 1, manual = TRUE, decimalPoint = 1),
-                f7ColorPicker("plot_col_outline_colour", "Bar outline colour", value = "#000000", modules = c("wheel", "hex")),
-                f7Stepper("plot_col_linewidth", "Bar outline linewidth", min = 0, max = 3, value = 1, step = 0.1, manual = TRUE, decimalPoint = 1),
-                f7Stepper("plot_text_outside_threshold", "Threshold for text being outside", min = 0, max = 1, value = 0.15, step = 0.05, manual = TRUE, decimalPoint = 2),
-                f7Stepper("plot_text_displacement", "Horizotnal text displacement", min = 0, max = 1, value = 0.25, step = 0.05, manual = TRUE, decimalPoint = 2),
-                f7ColorPicker("plot_text_inside_colour", "Inside text colour", value = "#FFFFFF", modules = c("wheel", "hex")),
-                f7ColorPicker("plot_text_outside_colour", "Outside text colour", value = "#000000", modules = c("wheel", "hex")),
-                f7ColorPicker("plot_text_shadow_colour", "Text shadow colour", value = "#000000", modules = c("wheel", "hex")),
-                f7Stepper("plot_text_shadow_radius", "Text shadow radius", min = 0, max = 1, value = 0.1, step = 0.05, manual = TRUE, decimalPoint = 2),
-                f7Stepper("plot_text_outside_shadow_alpha", "Outside text shadow alpha", min = 0, max = 1, value = 0, step = 0.05, manual = TRUE, decimalPoint = 2)
+                apply_settings_button("btn_apply_plot_settings", "Apply Plot Settings"),
+                settings_row("Starting Rank (e.g., 1st)", f7Stepper("plot_start", NULL, min = 1, max = 10000, value = 1, manual = TRUE, decimalPoint = 0)),
+                settings_row("How many bars to show", f7Stepper("plot_count", NULL, min = 5, max = 50, value = 10, step = 5, manual = TRUE, decimalPoint = 0)),
+                settings_row("Plot base size", f7Stepper("plot_base_size", NULL, min = 5, max = 50, value = 20, step = 1, manual = TRUE, decimalPoint = 0)),
+                settings_row("Number text size", f7Stepper("plot_text_size", NULL, min = 0, max = 25, value = 10, step = 1, manual = TRUE, decimalPoint = 1)),
+                settings_row("Bar outline colour", f7ColorPicker("plot_col_outline_colour", NULL, value = "#000000", modules = c("wheel", "hex"))),
+                settings_row("Bar outline linewidth", f7Stepper("plot_col_linewidth", NULL, min = 0, max = 3, value = 1, step = 0.1, manual = TRUE, decimalPoint = 1)),
+                settings_row("Threshold for text being outside", f7Stepper("plot_text_outside_threshold", NULL, min = 0, max = 1, value = 0.15, step = 0.05, manual = TRUE, decimalPoint = 2)),
+                settings_row("Horizontal text displacement", f7Stepper("plot_text_displacement", NULL, min = 0, max = 1, value = 0.25, step = 0.05, manual = TRUE, decimalPoint = 2)),
+                settings_row("Inside text colour", f7ColorPicker("plot_text_inside_colour", NULL, value = "#FFFFFF", modules = c("wheel", "hex"))),
+                settings_row("Outside text colour", f7ColorPicker("plot_text_outside_colour", NULL, value = "#000000", modules = c("wheel", "hex"))),
+                settings_row("Text shadow colour", f7ColorPicker("plot_text_shadow_colour", NULL, value = "#000000", modules = c("wheel", "hex"))),
+                settings_row("Text shadow radius", f7Stepper("plot_text_shadow_radius", NULL, min = 0, max = 1, value = 0.1, step = 0.05, manual = TRUE, decimalPoint = 2)),
+                settings_row("Outside text shadow alpha", f7Stepper("plot_text_outside_shadow_alpha", NULL, min = 0, max = 1, value = 0, step = 0.05, manual = TRUE, decimalPoint = 2))
             )
         ),
         
