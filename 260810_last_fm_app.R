@@ -13,9 +13,13 @@ library(purrr)
 library(memoise)
 library(shadowtext)
 
-shinyOptions(cache = cache_disk("./app_cache", max_age = 86400))
-image_cache <- cache_disk("./app_cache/images", max_age = 86400 * 30)
+## option for printing lots of debugging statements
+verbose <- FALSE
 
+shinyOptions(cache = cache_disk("./app_cache", max_age = 86400))
+## do NOT end in a slash
+image_location <- "app_cache/images"
+dir.create(image_location, recursive = TRUE, showWarnings = FALSE)
 
 lastfm_api_key <- readLines("api_lastfm.key")
 spotify_client_id <- readLines("api_spotify.key")[1]
@@ -33,8 +37,27 @@ get_spotify_token <- function(client_id, client_secret) {
 get_spotify_token_cached <- memoise(get_spotify_token, cache = cache_mem(max_age = 3400))
 
 ## Function for getting url
-get_image <- function(artist, album = NULL, track = NULL, size = 3) {
+get_image <- function(artist, album = NULL, track = NULL, size = 4) {
     image <- NULL
+    
+    file_prefix <- str_replace_all(tolower(artist), "[^a-z0-9]", "_")
+    if (!is.null(album)) {
+        file_suffix <- str_replace_all(tolower(album), "[^a-z0-9]", "_")
+        type <- "album"
+    } else if (!is.null(track)) {
+        file_suffix <- str_replace_all(tolower(track), "[^a-z0-9]", "_")
+        type <- "track"
+    } else {
+        file_suffix <- "artist"
+        type <- "artist"
+    }
+    
+    local_filename <- paste0(image_location, "/", type, "_", file_prefix, "_", file_suffix, ".jpg")
+    if (file.exists(local_filename)) {
+        return(local_filename)
+    }
+    
+    
     if (!is.null(album)) {
         album_url <- paste0(
             "http://ws.audioscrobbler.com/2.0/?method=album.getInfo&api_key=", lastfm_api_key, 
@@ -70,9 +93,18 @@ get_image <- function(artist, album = NULL, track = NULL, size = 3) {
     }
     
     
-    return(image)
+    if (!is.null(image) && image != "") {
+        tryCatch({
+            
+            download.file(url = image, destfile = local_filename, mode = "wb", quiet = TRUE)
+            return(local_filename)
+        }, error = function(e) {
+            return(NA) # Return NA if download fails
+        })
+    }
+    
+    return(NA)
 }
-get_image_cached <- memoise(get_image, cache = image_cache)
 
 ## Function for putting persistent popups into UI
 customF7Popup <- function(id, title, ..., close_text = "Close") {
@@ -240,21 +272,23 @@ app <- shinyApp(
             )
         ),
         
-        f7Sheet(
-            id = "sheet_settings",
-            orientation = "bottom",
-            swipeToClose = TRUE,
-            backdrop = TRUE,
-            f7BlockTitle("Plot Settings"),
+        customF7Popup(
+            "popup_settings",
+            "Plot settings",
             f7Block(
-                f7Select(
-                    "plot_color",
-                    label = "Bar Color",
-                    choices = c("Blue" = "#007aff", "Green" = "#4cd964", "Red" = "#ff3b30", "Purple" = "#af52de"),
-                    selected = "#007aff"
-                ),
-                f7Stepper("plot_start", "Starting Rank (e.g., 1st)", min = 1, max = 100, value = 1),
-                f7Stepper("plot_count", "How many bars to show", min = 5, max = 50, value = 10, step = 5)
+                f7Stepper("plot_start", "Starting Rank (e.g., 1st)", min = 1, max = 100, value = 1, manual = TRUE, decimalPoint = 0),
+                f7Stepper("plot_count", "How many bars to show", min = 5, max = 50, value = 10, step = 5, manual = TRUE, decimalPoint = 0),
+                f7Stepper("plot_base_size", "Plot base size", min = 5, max = 50, value = 20, step = 1, manual = TRUE, decimalPoint = 0),
+                f7Stepper("plot_text_size", "Number text size", min = 0, max = 25, value = 10, step = 2.5, manual = TRUE, decimalPoint = 1),
+                f7ColorPicker("plot_col_outline_colour", "Bar outline colour", value = "#000000"),
+                f7Stepper("plot_col_linewidth", "Bar outline linewidth", min = 0, max = 3, value = 1, step = 0.25, manual = TRUE, decimalPoint = 2),
+                f7Stepper("plot_text_outside_threshold", "Threshold for text being outside", min = 0, max = 1, value = 0.15, step = 0.05, manual = TRUE, decimalPoint = 2),
+                f7Stepper("plot_text_displacement", "Horizotnal text displacement", min = 0, max = 1, value = 0.25, step = 0.05, manual = TRUE, decimalPoint = 2),
+                f7ColorPicker("plot_text_inside_colour", "Inside text colour", value = "#FFFFFF"),
+                f7ColorPicker("plot_text_outside_colour", "Outside text colour", value = "#000000"),
+                f7ColorPicker("plot_text_shadow_colour", "Text shadow colour", value = "#000000"),
+                f7Stepper("plot_text_shadow_radius", "Text shadow radius", min = 0, max = 1, value = 0.1, step = 0.05, manual = TRUE, decimalPoint = 2),
+                f7Stepper("plot_text_outside_shadow_alpha", "Outside text shadow alpha", min = 0, max = 1, value = 0, step = 0.05, manual = TRUE, decimalPoint = 2)
             )
         ),
         
@@ -342,26 +376,32 @@ app <- shinyApp(
         ## Bind the top bar buttons to open their respective sheets
         observeEvent(input$btn_subset, { session$sendCustomMessage("open_f7_popup", "popup_subset") })
         observeEvent(input$btn_date, { session$sendCustomMessage("open_f7_popup", "popup_date") })
-        observeEvent(input$btn_settings, { updateF7Sheet(id = "sheet_settings") })
+        observeEvent(input$btn_settings, { session$sendCustomMessage("open_f7_popup", "popup_settings") })
         observeEvent(input$btn_input, { updateF7Sheet(id = "sheet_input") })
         
         ## DATA LOADING
         ## ---------------------------------------------------------------------
         ## Load the data
         raw_data <- reactive({
+            if (verbose) {print("Raw data initialising", quote = F)}
             req(input$input_csv)
-            read.csv(input$input_csv) %>%
+            if (verbose) {print("Raw data req passed", quote = F)}
+            raw_data <- read.csv(input$input_csv) %>%
                 mutate(across(
                     c(artist, album, track),
                     ~ str_to_title(.) %>% 
                         str_replace_all('"', "'")
                 ))
+            if (verbose) {print("Raw data read", quote = F)}
+            raw_data
         }) %>% bindCache(input$input_csv, Sys.Date())
         
         ## Change all dates when timezone changes
         full_data <- reactive({
+            if (verbose) {print("Full data initialising", quote = F)}
             req(input$selected_timezone)
-            raw_data() %>%
+            if (verbose) {print("Full data req passed", quote = F)}
+            full_data <- raw_data() %>%
                 select(datetime_utc, track, artist, album) %>%
                 mutate(
                     datetime_utc = as_datetime(datetime_utc),
@@ -369,6 +409,8 @@ app <- shinyApp(
                     year    = format(datetime_utc, "%Y", tz = input$selected_timezone),
                     utc_sec = as.numeric(datetime_utc)
                 )
+            if (verbose) {print("Full data read", quote = F)}
+            full_data
         })
         ## ---------------------------------------------------------------------
         
@@ -1034,17 +1076,17 @@ app <- shinyApp(
             req(input$tabs == "Tracks")
             
             ## Make these configurable later
-            base_size <- 20
-            col_outline_colour <- "black"
-            col_linewidth <- 1
-            text_outside_threshold <- 0.15
-            text_outside_displacement <- 0.25
-            text_inside_colour <- "white"
-            text_outside_colour <- "black"
-            text_inside_shadow_colour <- "black"
-            text_outside_shadow_alpha <- 0
-            text_shadow_radius <- 0.1
-            text_size <- 10
+            base_size <- input$plot_base_size
+            text_size <- input$plot_text_size
+            col_outline_colour <- input$plot_col_outline_colour$hex
+            col_linewidth <- input$plot_col_linewidth
+            text_outside_threshold <- input$plot_text_outside_threshold
+            text_displacement <- input$plot_text_displacement
+            text_inside_colour <- input$plot_text_inside_colour$hex
+            text_outside_colour <- input$plot_text_outside_colour$hex
+            text_shadow_colour <- input$plot_text_shadow_colour$hex
+            text_outside_shadow_alpha <- input$plot_text_outside_shadow_alpha
+            text_shadow_radius <- input$plot_text_shadow_radius
             
             
             ##### could we instead do the first group_by dynamically, so that we only need this code once for tracks / albums / artists?
@@ -1052,7 +1094,8 @@ app <- shinyApp(
                 group_by(artist, track) %>%
                 summarise(plays = n(), .groups = "drop") %>%
                 arrange(desc(plays), track)
-                
+            
+
             max_plays <- ifelse(length(tracks_data$plays) > 0, max(tracks_data$plays), 0)
             
             tracks_data <- tracks_data %>%
@@ -1060,7 +1103,7 @@ app <- shinyApp(
                     rank = row_number(),
                     label = paste0(rank, "\\. **", track, "**<br>", artist),
                     is_short = plays < (max_plays * text_outside_threshold),
-                    text_hjust = if_else(is_short, -text_outside_displacement, 1 + text_outside_displacement)
+                    text_hjust = if_else(is_short, -text_displacement, 1 + text_displacement)
                 )
             
             req(nrow(tracks_data) > 0)
@@ -1068,7 +1111,7 @@ app <- shinyApp(
             idx <- graph_rows()
             max_row <- min(idx[2], nrow(tracks_data))
             plot_data <- tracks_data[idx[1]:max_row, ] %>%
-                mutate(image_url = map2_chr(artist, track, ~ get_image_cached(artist = .x, track = .y, size = 4)))
+                mutate(image_url = map2_chr(artist, track, ~ get_image(artist = .x, track = .y, size = 4)))
             
             date_range <- applied_date_range()
             
@@ -1077,7 +1120,7 @@ app <- shinyApp(
                 geom_shadowtext(aes(label = plays, hjust = text_hjust, col = as.character(is_short), bg.colour = as.character(is_short)), 
                                 bg.r = text_shadow_radius, size = text_size) +
                 scale_colour_manual(values = c("TRUE" = text_outside_colour, "FALSE" = text_inside_colour)) +
-                scale_discrete_manual(aesthetics = "bg.colour", values = c("TRUE" = alpha(text_inside_shadow_colour, text_outside_shadow_alpha), "FALSE" = text_inside_shadow_colour)) +
+                scale_discrete_manual(aesthetics = "bg.colour", values = c("TRUE" = alpha(text_shadow_colour, text_outside_shadow_alpha), "FALSE" = text_shadow_colour)) +
                 scale_pattern_filename_identity() +
                 coord_cartesian(xlim = c(0, NA), expand = FALSE, clip = "off") +
                 ggtitle(paste0(date_range[1], " to ", date_range[2])) +
