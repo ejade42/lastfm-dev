@@ -1225,8 +1225,20 @@ app <- shinyApp(
         output$over_time_graph <- renderPlot({
             req(input$tabs == "Over_time")
             
+            
+            
             subset_data <- subset_data()
             settings <- plot_settings()
+            ## Need to make configurable later
+            settings$max_days_to_draw_as_hours <- 0
+            settings$max_days_to_draw_as_days <- 30
+            settings$max_days_to_draw_as_months <- 366
+            settings$hours_format  <- "%H:00"
+            settings$days_format   <- "%a %d %b %Y"
+            settings$months_format <- "%b %Y"
+            settings$years_format  <- "%Y"
+            settings$col_colour <- "red"
+            
             selected_timezone <- input$selected_timezone %||% Sys.timezone()
             
             date_range <- applied_date_range()
@@ -1234,18 +1246,39 @@ app <- shinyApp(
             
             
             
-            if (date_range_days == 0) {
-                all_hours <- sprintf("%02d:00", 0:23)
+            if (date_range_days <= settings$max_days_to_draw_as_hours) {
+                all_timepoints <- format(seq(as_datetime(floor_date(date_range[1], "day"), tz = selected_timezone),
+                                             as_datetime(ceiling_date(date_range[2], "day"), tz = selected_timezone) - seconds(1),
+                                             by = "hour"), format = settings$hours_format)
+                subset_data$timepoint <- format(as_datetime(subset_data$datetime_utc, tz = selected_timezone), format = settings$hours_format)
+
+            } else if (date_range_days <= settings$max_days_to_draw_as_days) {
+                all_timepoints <- format(seq(date_range[1], date_range[2], by = "day"), format = settings$days_format)
+                subset_data$timepoint <- format(as_datetime(subset_data$datetime_utc, tz = selected_timezone), format = settings$days_format)
+
+            } else if (date_range_days <= settings$max_days_to_draw_as_months) {
+                all_timepoints <- format(seq(floor_date(date_range[1], "month"),
+                                             floor_date(date_range[2], "month"),
+                                             by = "month"), format = settings$months_format)
+                subset_data$timepoint <- format(as_datetime(subset_data$datetime_utc, tz = selected_timezone), format = settings$months_format)
                 
-                subset_data$hour <- format(as_datetime(subset_data$datetime_utc, tz = selected_timezone), format = "%H")
-                subset_data$timepoint <- paste0(subset_data$hour, ":00")
-                grouped_data <- subset_data %>%
-                    group_by(timepoint) %>%
-                    summarise(plays = n(), .groups = "drop") %>%
-                    complete(timepoint = all_hours, fill = list(plays = 0)) %>%
-                    mutate(timepoint = factor(timepoint, levels = all_hours))
+            } else {
+                all_timepoints <- format(seq(floor_date(date_range[1], "year"),
+                                             floor_date(date_range[2], "year"),
+                                             by = "year"), format = settings$years_format)
+                subset_data$timepoint <- format(as_datetime(subset_data$datetime_utc, tz = selected_timezone), format = settings$years_format)
+                
             }
+
             
+            grouped_data <- subset_data %>%
+                group_by(timepoint) %>%
+                summarise(plays = n(), .groups = "drop") %>%
+                complete(timepoint = all_timepoints, fill = list(plays = 0)) %>%
+                mutate(timepoint = factor(timepoint, levels = all_timepoints))
+            
+            
+                
             grouped_data$max_plays <- ifelse(nrow(grouped_data) > 0, max(grouped_data$plays), 0)
             grouped_data <- grouped_data %>%
                 mutate(
@@ -1253,11 +1286,12 @@ app <- shinyApp(
                     text_hjust = if_else(is_short, -settings$text_displacement, 1 + settings$text_displacement)
                 )
             
-            left_title <- paste0("**Total:** ", sum(grouped_data$plays))
+            left_title <- paste0("**Total:** ", sum(grouped_data$plays), 
+                                 "   **Average:** ", round(sum(grouped_data$plays) / (date_range_days + 1), digits = 1), "/day")
             right_title <- paste0(date_range[1], " to ", date_range[2])
             
             ggplot(grouped_data, aes(y = timepoint, x = plays)) +
-                geom_col(fill = "red", col = settings$col_outline_colour, linewidth = settings$col_linewidth) +
+                geom_col(fill = settings$col_colour, col = settings$col_outline_colour, linewidth = settings$col_linewidth) +
                 geom_shadowtext(aes(label = plays, hjust = text_hjust, col = as.character(is_short), bg.colour = as.character(is_short)), 
                                 bg.r = settings$text_shadow_radius, size = settings$text_size) +
                 scale_colour_manual(values = c("TRUE" = settings$text_outside_colour, "FALSE" = settings$text_inside_colour)) +
