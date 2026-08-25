@@ -16,6 +16,7 @@ library(shadowtext)
 
 ## option for printing lots of debugging statements
 verbose <- FALSE
+stepper_inf <- 1e9
 
 shinyOptions(cache = cache_disk("./app_cache", max_age = 86400))
 ## do NOT end in a slash
@@ -299,7 +300,7 @@ app <- shinyApp(
             "Plot settings",
             f7Block(
                 apply_settings_button("btn_apply_plot_settings", "Apply Plot Settings"),
-                settings_row("Starting Rank (e.g., 1st)", f7Stepper("plot_start", NULL, min = 1, max = 10000, value = 1, manual = TRUE, decimalPoint = 0)),
+                settings_row("Starting Rank (e.g., 1st)", f7Stepper("plot_start", NULL, min = 1, max = stepper_inf, value = 1, step = 1, manual = TRUE, decimalPoint = 0)),
                 settings_row("How many bars to show", f7Stepper("plot_count", NULL, min = 5, max = 50, value = 10, step = 5, manual = TRUE, decimalPoint = 0)),
                 settings_row("Plot base size", f7Stepper("plot_base_size", NULL, min = 5, max = 50, value = 20, step = 1, manual = TRUE, decimalPoint = 0)),
                 settings_row("Number text size", f7Stepper("plot_text_size", NULL, min = 0, max = 25, value = 10, step = 1, manual = TRUE, decimalPoint = 1)),
@@ -311,7 +312,16 @@ app <- shinyApp(
                 settings_row("Outside text colour", f7ColorPicker("plot_text_outside_colour", NULL, value = "#000000", modules = c("wheel", "hex"))),
                 settings_row("Text shadow colour", f7ColorPicker("plot_text_shadow_colour", NULL, value = "#000000", modules = c("wheel", "hex"))),
                 settings_row("Text shadow radius", f7Stepper("plot_text_shadow_radius", NULL, min = 0, max = 1, value = 0.1, step = 0.05, manual = TRUE, decimalPoint = 2)),
-                settings_row("Outside text shadow alpha", f7Stepper("plot_text_outside_shadow_alpha", NULL, min = 0, max = 1, value = 0, step = 0.05, manual = TRUE, decimalPoint = 2))
+                settings_row("Outside text shadow alpha", f7Stepper("plot_text_outside_shadow_alpha", NULL, min = 0, max = 1, value = 0, step = 0.05, manual = TRUE, decimalPoint = 2)),
+                p("For 'Over time' plots only:"),
+                settings_row("Max days to draw as hours",  f7Stepper("plot_max_days_to_draw_as_hours",  NULL, min = 1, max = stepper_inf, value = 1,   step = 1,  manual = TRUE, decimalPoint = 0)),
+                settings_row("Max days to draw as days",   f7Stepper("plot_max_days_to_draw_as_days",   NULL, min = 1, max = stepper_inf, value = 40,  step = 5,  manual = TRUE, decimalPoint = 0)),
+                settings_row("Max days to draw as months", f7Stepper("plot_max_days_to_draw_as_months", NULL, min = 1, max = stepper_inf, value = 370, step = 10, manual = TRUE, decimalPoint = 0)),
+                settings_row("Hours display format",  f7Text("plot_hours_format",  NULL, value = "%H:00", placeholder = "%H:00")),
+                settings_row("Days display format",   f7Text("plot_days_format",   NULL, value = "%a %d %b %Y", placeholder = "%a %d %b %Y")),
+                settings_row("Months display format", f7Text("plot_months_format", NULL, value = "%b %Y", placeholder = "%b %Y")),
+                settings_row("Years display format",  f7Text("plot_years_format",  NULL, value = "%Y", placeholder = "%Y")),
+                settings_row("Bar colour", f7ColorPicker("plot_col_colour", NULL, value = "#FF0000", modules = c("wheel", "hex")))
             )
         ),
         
@@ -1069,7 +1079,15 @@ app <- shinyApp(
                 text_shadow_colour = input$plot_text_shadow_colour$hex,
                 text_outside_shadow_alpha = input$plot_text_outside_shadow_alpha,
                 text_shadow_radius = input$plot_text_shadow_radius,
-                graph_rows = c(input$plot_start, input$plot_start + input$plot_count - 1)
+                graph_rows = c(input$plot_start, input$plot_start + input$plot_count - 1),
+                max_days_to_draw_as_hours = input$plot_max_days_to_draw_as_hours,
+                max_days_to_draw_as_days = input$plot_max_days_to_draw_as_days,
+                max_days_to_draw_as_months = input$plot_max_days_to_draw_as_months,
+                hours_format = input$plot_hours_format,
+                days_format = input$plot_days_format,
+                months_format = input$plot_months_format,
+                years_format = input$plot_years_format,
+                col_colour = input$plot_col_colour$hex
             )
         }) %>% bindEvent(full_data(), input$btn_apply_plot_settings, ignoreInit = FALSE)
         
@@ -1229,20 +1247,11 @@ app <- shinyApp(
             
             subset_data <- subset_data()
             settings <- plot_settings()
-            ## Need to make configurable later
-            settings$max_days_to_draw_as_hours <- 0
-            settings$max_days_to_draw_as_days <- 30
-            settings$max_days_to_draw_as_months <- 366
-            settings$hours_format  <- "%H:00"
-            settings$days_format   <- "%a %d %b %Y"
-            settings$months_format <- "%b %Y"
-            settings$years_format  <- "%Y"
-            settings$col_colour <- "red"
             
             selected_timezone <- input$selected_timezone %||% Sys.timezone()
             
             date_range <- applied_date_range()
-            date_range_days <- lubridate::interval(date_range[1], date_range[2]) %/% days(1)
+            date_range_days <- lubridate::interval(date_range[1], date_range[2]) %/% days(1) + 1
             
             
             
@@ -1287,7 +1296,7 @@ app <- shinyApp(
                 )
             
             left_title <- paste0("**Total:** ", sum(grouped_data$plays), 
-                                 "   **Average:** ", round(sum(grouped_data$plays) / (date_range_days + 1), digits = 1), "/day")
+                                 "   **Average:** ", round(sum(grouped_data$plays) / date_range_days, digits = 1), "/day")
             right_title <- paste0(date_range[1], " to ", date_range[2])
             
             ggplot(grouped_data, aes(y = timepoint, x = plays)) +
