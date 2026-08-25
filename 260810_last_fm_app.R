@@ -302,6 +302,7 @@ app <- shinyApp(
                 apply_settings_button("btn_apply_plot_settings", "Apply Plot Settings"),
                 settings_row("Starting Rank (e.g., 1st)", f7Stepper("plot_start", NULL, min = 1, max = stepper_inf, value = 1, step = 1, manual = TRUE, decimalPoint = 0)),
                 settings_row("How many bars to show", f7Stepper("plot_count", NULL, min = 5, max = 50, value = 10, step = 5, manual = TRUE, decimalPoint = 0)),
+                settings_row("Thousands separator", f7Text("plot_thousands_sep", NULL, value = ",", placeholder = ",")),
                 settings_row("Plot base size", f7Stepper("plot_base_size", NULL, min = 5, max = 50, value = 20, step = 1, manual = TRUE, decimalPoint = 0)),
                 settings_row("Number text size", f7Stepper("plot_text_size", NULL, min = 0, max = 25, value = 10, step = 1, manual = TRUE, decimalPoint = 1)),
                 settings_row("Bar outline colour", f7ColorPicker("plot_col_outline_colour", NULL, value = "#000000", modules = c("wheel", "hex"))),
@@ -1070,6 +1071,7 @@ app <- shinyApp(
             list(
                 base_size = input$plot_base_size,
                 text_size = input$plot_text_size,
+                thousands_sep = input$plot_thousands_sep,
                 col_outline_colour = input$plot_col_outline_colour$hex,
                 col_linewidth = input$plot_col_linewidth,
                 text_outside_threshold = input$plot_text_outside_threshold,
@@ -1186,7 +1188,7 @@ app <- shinyApp(
             # 7. Generate the plot
             ggplot(plot_data, aes(y = reorder(label, desc(rank)), x = plays)) +
                 geom_col_pattern(aes(pattern_filename = image_url), pattern = "image", pattern_type = "expand", col = settings$col_outline_colour, linewidth = settings$col_linewidth) +
-                geom_shadowtext(aes(label = plays, hjust = text_hjust, col = as.character(is_short), bg.colour = as.character(is_short)), 
+                geom_shadowtext(aes(label = prettyNum(plays, big.mark = settings$thousands_sep), hjust = text_hjust, col = as.character(is_short), bg.colour = as.character(is_short)), 
                                 bg.r = settings$text_shadow_radius, size = settings$text_size) +
                 scale_colour_manual(values = c("TRUE" = settings$text_outside_colour, "FALSE" = settings$text_inside_colour)) +
                 scale_discrete_manual(aesthetics = "bg.colour", values = c("TRUE" = alpha(settings$text_shadow_colour, settings$text_outside_shadow_alpha), "FALSE" = settings$text_shadow_colour)) +
@@ -1295,13 +1297,13 @@ app <- shinyApp(
                     text_hjust = if_else(is_short, -settings$text_displacement, 1 + settings$text_displacement)
                 )
             
-            left_title <- paste0("**Total:** ", sum(grouped_data$plays), 
+            left_title <- paste0("**Total:** ", prettyNum(sum(grouped_data$plays), big.mark = settings$thousands_sep), 
                                  "   **Average:** ", round(sum(grouped_data$plays) / date_range_days, digits = 1), "/day")
             right_title <- paste0(date_range[1], " to ", date_range[2])
             
             ggplot(grouped_data, aes(y = timepoint, x = plays)) +
                 geom_col(fill = settings$col_colour, col = settings$col_outline_colour, linewidth = settings$col_linewidth) +
-                geom_shadowtext(aes(label = plays, hjust = text_hjust, col = as.character(is_short), bg.colour = as.character(is_short)), 
+                geom_shadowtext(aes(label = prettyNum(plays, big.mark = settings$thousands_sep), hjust = text_hjust, col = as.character(is_short), bg.colour = as.character(is_short)), 
                                 bg.r = settings$text_shadow_radius, size = settings$text_size) +
                 scale_colour_manual(values = c("TRUE" = settings$text_outside_colour, "FALSE" = settings$text_inside_colour)) +
                 scale_discrete_manual(aesthetics = "bg.colour", values = c("TRUE" = alpha(settings$text_shadow_colour, settings$text_outside_shadow_alpha), "FALSE" = settings$text_shadow_colour)) +
