@@ -2,6 +2,7 @@ library(shiny)
 library(shinyMobile)
 library(ggplot2)
 library(dplyr)
+library(tidyr)
 library(lubridate)
 library(cachem)
 library(ggtext)
@@ -346,7 +347,7 @@ app <- shinyApp(
                 )
             ),
             
-            ## The 4 main tabs
+            ## The 5 main tabs
             f7Tabs(
                 id = "tabs",
                 swipeable = TRUE,
@@ -376,9 +377,9 @@ app <- shinyApp(
                 
                 f7Tab(
                     title = "Over time",
-                    tabName = "over_time",
+                    tabName = "Over_time",
                     icon = f7Icon("calendar"),
-                    f7Block("time graph")
+                    f7Block(plotOutput("over_time_graph", width = "100%", height = "calc(100vh - 250px)"))
                 ),
                 
                 f7Tab(
@@ -1219,6 +1220,64 @@ app <- shinyApp(
                 settings = plot_settings(), 
                 date_range = applied_date_range()
             )
+        })
+        
+        output$over_time_graph <- renderPlot({
+            req(input$tabs == "Over_time")
+            
+            subset_data <- subset_data()
+            settings <- plot_settings()
+            selected_timezone <- input$selected_timezone %||% Sys.timezone()
+            
+            date_range <- applied_date_range()
+            date_range_days <- lubridate::interval(date_range[1], date_range[2]) %/% days(1)
+            
+            
+            
+            if (date_range_days == 0) {
+                all_hours <- sprintf("%02d:00", 0:23)
+                
+                subset_data$hour <- format(as_datetime(subset_data$datetime_utc, tz = selected_timezone), format = "%H")
+                subset_data$timepoint <- paste0(subset_data$hour, ":00")
+                grouped_data <- subset_data %>%
+                    group_by(timepoint) %>%
+                    summarise(plays = n(), .groups = "drop") %>%
+                    complete(timepoint = all_hours, fill = list(plays = 0)) %>%
+                    mutate(timepoint = factor(timepoint, levels = all_hours))
+            }
+            
+            grouped_data$max_plays <- ifelse(nrow(grouped_data) > 0, max(grouped_data$plays), 0)
+            grouped_data <- grouped_data %>%
+                mutate(
+                    is_short = plays < (max_plays * settings$text_outside_threshold),
+                    text_hjust = if_else(is_short, -settings$text_displacement, 1 + settings$text_displacement)
+                )
+            
+            left_title <- paste0("**Total:** ", sum(grouped_data$plays))
+            right_title <- paste0(date_range[1], " to ", date_range[2])
+            
+            ggplot(grouped_data, aes(y = timepoint, x = plays)) +
+                geom_col(fill = "red", col = settings$col_outline_colour, linewidth = settings$col_linewidth) +
+                geom_shadowtext(aes(label = plays, hjust = text_hjust, col = as.character(is_short), bg.colour = as.character(is_short)), 
+                                bg.r = settings$text_shadow_radius, size = settings$text_size) +
+                scale_colour_manual(values = c("TRUE" = settings$text_outside_colour, "FALSE" = settings$text_inside_colour)) +
+                scale_discrete_manual(aesthetics = "bg.colour", values = c("TRUE" = alpha(settings$text_shadow_colour, settings$text_outside_shadow_alpha), "FALSE" = settings$text_shadow_colour)) +
+                scale_y_discrete(limits = rev) +
+                coord_cartesian(xlim = c(0, NA), expand = FALSE, clip = "off") +
+                labs(title = left_title, tag = right_title) +
+                theme_classic(base_size = settings$base_size) +
+                theme(plot.title = element_markdown(),
+                      plot.tag.position = c(1, 1),
+                      plot.tag = element_text(size = rel(1.2), hjust = 1, vjust = 1),
+                      panel.grid.major.y = element_blank(),
+                      panel.grid.minor.y = element_blank(),
+                      panel.border = element_blank(),
+                      axis.title = element_blank(),
+                      axis.text.y = element_markdown(),
+                      axis.ticks = element_blank(),
+                      axis.line = element_blank(),
+                      axis.text.x = element_blank()) +
+                guides(col = "none", bg.colour = "none")
         })
         ## ---------------------------------------------------------------------
     }
