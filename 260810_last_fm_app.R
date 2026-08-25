@@ -179,6 +179,30 @@ extract_numeric_date <- function(day_label, month_name, year) {
     lubridate::as_date(constructed_date)
 }
 
+smart_wrap <- function(text, target = 20, max_lines = 4, br = "<br>") {
+    sapply(text, function(x) {
+        if (is.na(x) || nchar(x) == 0) return(x)
+        
+        len <- nchar(x)
+        dist_unwrapped <- abs(len - target)
+        
+        # Test line counts (n = 2 to max_lines)
+        n_lines <- 2:max_lines
+        dist_wrapped <- abs((len / n_lines) - target)
+        
+        # Check if any n brings the length closer to target than 1 line
+        if (min(dist_wrapped) < dist_unwrapped) {
+            best_n <- n_lines[which.min(dist_wrapped)]
+            ideal_width <- ceiling(len / best_n)
+            
+            wrapped <- stringr::str_wrap(x, width = ideal_width)
+            gsub("\n", br, wrapped)
+        } else {
+            x
+        }
+    }, USE.NAMES = FALSE)
+}
+
 app <- shinyApp(
     ui = f7Page(
         tags$head(
@@ -303,6 +327,8 @@ app <- shinyApp(
                 settings_row("Starting Rank (e.g., 1st)", f7Stepper("plot_start", NULL, min = 1, max = stepper_inf, value = 1, step = 1, manual = TRUE, decimalPoint = 0)),
                 settings_row("How many bars to show", f7Stepper("plot_count", NULL, min = 5, max = 50, value = 10, step = 5, manual = TRUE, decimalPoint = 0)),
                 settings_row("Thousands separator", f7Text("plot_thousands_sep", NULL, value = ",", placeholder = ",")),
+                settings_row("Smart wrap target", f7Stepper("plot_smartwrap_target", NULL, min = 1, max = stepper_inf, value = 20, step = 5, manual = TRUE, decimalPoint = 0)),
+                settings_row("Smart wrap max lines", f7Stepper("plot_smartwrap_max", NULL, min = 1, max = 10, value = 2, step = 1, manual = TRUE, decimalPoint = 0)),
                 settings_row("Plot base size", f7Stepper("plot_base_size", NULL, min = 5, max = 50, value = 20, step = 1, manual = TRUE, decimalPoint = 0)),
                 settings_row("Number text size", f7Stepper("plot_text_size", NULL, min = 0, max = 25, value = 10, step = 1, manual = TRUE, decimalPoint = 1)),
                 settings_row("Bar outline colour", f7ColorPicker("plot_col_outline_colour", NULL, value = "#000000", modules = c("wheel", "hex"))),
@@ -1072,6 +1098,8 @@ app <- shinyApp(
                 base_size = input$plot_base_size,
                 text_size = input$plot_text_size,
                 thousands_sep = input$plot_thousands_sep,
+                smartwrap_target = input$plot_smartwrap_target,
+                smartwrap_max = input$plot_smartwrap_max,
                 col_outline_colour = input$plot_col_outline_colour$hex,
                 col_linewidth = input$plot_col_linewidth,
                 text_outside_threshold = input$plot_text_outside_threshold,
@@ -1150,9 +1178,10 @@ app <- shinyApp(
                 mutate(
                     rank = row_number(),
                     label = if (entity == "artist") {
-                        paste0(rank, "\\. **", artist, "**")
+                        paste0(rank, "\\. **", smart_wrap(artist, settings$smartwrap_target, settings$smartwrap_max), "**")
                     } else {
-                        paste0(rank, "\\. **", .data[[entity]], "**<br>", artist)
+                        paste0(rank, "\\. **", smart_wrap(.data[[entity]], settings$smartwrap_target, settings$smartwrap_max), 
+                               "**<br>", smart_wrap(artist, settings$smartwrap_target, settings$smartwrap_max))
                     },
                     is_short = plays < (max_plays * settings$text_outside_threshold),
                     text_hjust = if_else(is_short, -settings$text_displacement, 1 + settings$text_displacement)
