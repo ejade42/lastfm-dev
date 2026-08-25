@@ -179,27 +179,47 @@ extract_numeric_date <- function(day_label, month_name, year) {
     lubridate::as_date(constructed_date)
 }
 
-smart_wrap <- function(text, target = 20, max_lines = 4, br = "<br>") {
+smart_wrap <- function(text, target = 20, max_lines = 3, br = "<br>") {
     sapply(text, function(x) {
         if (is.na(x) || nchar(x) == 0) return(x)
         
-        len <- nchar(x)
-        dist_unwrapped <- abs(len - target)
+        words <- unlist(strsplit(x, "\\s+"))
+        num_words <- length(words)
+        total_len <- nchar(x)
         
-        # Test line counts (n = 2 to max_lines)
-        n_lines <- 2:max_lines
-        dist_wrapped <- abs((len / n_lines) - target)
+        # Return untouched if within target length or single word
+        if (total_len <= target || num_words <= 1) return(x)
         
-        # Check if any n brings the length closer to target than 1 line
-        if (min(dist_wrapped) < dist_unwrapped) {
-            best_n <- n_lines[which.min(dist_wrapped)]
-            ideal_width <- ceiling(len / best_n)
+        # Calculate ideal line count n
+        n <- min(ceiling(total_len / target), max_lines, num_words)
+        if (n <= 1) return(x)
+        
+        # Generate all valid partitions of words across n lines
+        possible_splits <- combn(1:(num_words - 1), n - 1, simplify = FALSE)
+        
+        best_lines <- NULL
+        best_score <- Inf
+        ideal_len <- total_len / n
+        
+        for (split in possible_splits) {
+            line_starts <- c(1, split + 1)
+            line_ends   <- c(split, num_words)
             
-            wrapped <- stringr::str_wrap(x, width = ideal_width)
-            gsub("\n", br, wrapped)
-        } else {
-            x
+            lines <- sapply(seq_along(line_starts), function(i) {
+                paste(words[line_starts[i]:line_ends[i]], collapse = " ")
+            })
+            
+            # Score metric: Sum of squared deviations from mean target line length
+            lengths <- nchar(lines)
+            score <- sum((lengths - ideal_len)^2)
+            
+            if (score < best_score) {
+                best_score <- score
+                best_lines <- lines
+            }
         }
+        
+        paste(best_lines, collapse = br)
     }, USE.NAMES = FALSE)
 }
 
@@ -327,8 +347,8 @@ app <- shinyApp(
                 settings_row("Starting Rank (e.g., 1st)", f7Stepper("plot_start", NULL, min = 1, max = stepper_inf, value = 1, step = 1, manual = TRUE, decimalPoint = 0)),
                 settings_row("How many bars to show", f7Stepper("plot_count", NULL, min = 5, max = 50, value = 10, step = 5, manual = TRUE, decimalPoint = 0)),
                 settings_row("Thousands separator", f7Text("plot_thousands_sep", NULL, value = ",", placeholder = ",")),
-                settings_row("Smart wrap target", f7Stepper("plot_smartwrap_target", NULL, min = 1, max = stepper_inf, value = 20, step = 5, manual = TRUE, decimalPoint = 0)),
-                settings_row("Smart wrap max lines", f7Stepper("plot_smartwrap_max", NULL, min = 1, max = 10, value = 2, step = 1, manual = TRUE, decimalPoint = 0)),
+                settings_row("Smart wrap target", f7Stepper("plot_smartwrap_target", NULL, min = 1, max = stepper_inf, value = 25, step = 5, manual = TRUE, decimalPoint = 0)),
+                settings_row("Smart wrap max lines", f7Stepper("plot_smartwrap_max", NULL, min = 1, max = 10, value = 3, step = 1, manual = TRUE, decimalPoint = 0)),
                 settings_row("Plot base size", f7Stepper("plot_base_size", NULL, min = 5, max = 50, value = 20, step = 1, manual = TRUE, decimalPoint = 0)),
                 settings_row("Number text size", f7Stepper("plot_text_size", NULL, min = 0, max = 25, value = 10, step = 1, manual = TRUE, decimalPoint = 1)),
                 settings_row("Bar outline colour", f7ColorPicker("plot_col_outline_colour", NULL, value = "#000000", modules = c("wheel", "hex"))),
