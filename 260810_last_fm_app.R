@@ -13,6 +13,8 @@ library(ggpattern)
 library(purrr)
 library(memoise)
 library(shadowtext)
+library(cowplot)
+library(gridtext)
 
 ## option for printing lots of debugging statements
 verbose <- FALSE
@@ -344,6 +346,9 @@ app <- shinyApp(
             "Plot settings",
             f7Block(
                 apply_settings_button("btn_apply_plot_settings", "Apply Plot Settings"),
+                settings_row("Show title", f7Checkbox("plot_show_title", NULL, value = TRUE)),
+                settings_row("Show dates", f7Checkbox("plot_show_dates", NULL, value = TRUE)),
+                settings_row("Show subset", f7Checkbox("plot_show_subset", NULL, value = TRUE)),
                 settings_row("Starting Rank (e.g., 1st)", f7Stepper("plot_start", NULL, min = 1, max = stepper_inf, value = 1, step = 1, manual = TRUE, decimalPoint = 0)),
                 settings_row("How many bars to show", f7Stepper("plot_count", NULL, min = 5, max = 50, value = 10, step = 5, manual = TRUE, decimalPoint = 0)),
                 settings_row("Thousands separator", f7Text("plot_thousands_sep", NULL, value = ",", placeholder = ",")),
@@ -1115,6 +1120,9 @@ app <- shinyApp(
         
         plot_settings <- reactive({
             list(
+                show_title = input$plot_show_title,
+                show_dates = input$plot_show_dates,
+                show_subset = input$plot_show_subset,
                 base_size = input$plot_base_size,
                 text_size = input$plot_text_size,
                 thousands_sep = input$plot_thousands_sep,
@@ -1234,6 +1242,15 @@ app <- shinyApp(
             left_title <- stringr::str_to_title(entity)
             right_title <- paste0(date_range[1], " to ", date_range[2])
             
+            art_val <- ifelse(is.null(input$subset_artist) || input$subset_artist == "", "All", input$subset_artist)
+            alb_val <- ifelse(is.null(input$subset_album) || input$subset_album == "", "All", input$subset_album)
+            tra_val <- ifelse(is.null(input$subset_track) || input$subset_track == "", "All", input$subset_track)
+            caption <- paste0("<b>Artist: </b>", art_val, "<br><b>Album: </b>", alb_val, "<br><b>Track: </b>", tra_val)
+            
+            if (!settings$show_title) {left_title <- NULL}
+            if (!settings$show_dates) {right_title <- NULL}
+            if (!settings$show_subset) {caption <- NULL}
+            
             # 7. Generate the plot
             ggplot(plot_data, aes(y = reorder(label, desc(rank)), x = plays)) +
                 geom_col_pattern(aes(pattern_filename = image_url), pattern = "image", pattern_type = "expand", col = settings$col_outline_colour, linewidth = settings$col_linewidth) +
@@ -1243,9 +1260,10 @@ app <- shinyApp(
                 scale_discrete_manual(aesthetics = "bg.colour", values = c("TRUE" = alpha(settings$text_shadow_colour, settings$text_outside_shadow_alpha), "FALSE" = settings$text_shadow_colour)) +
                 scale_pattern_filename_identity() +
                 coord_cartesian(xlim = c(0, NA), expand = FALSE, clip = "off") +
-                labs(title = left_title, tag = right_title) +
+                labs(title = left_title, tag = right_title, caption = caption) +
                 theme_classic(base_size = settings$base_size) +
                 theme(plot.title = element_text(face = "bold"),
+                      plot.caption = element_markdown(size = rel(1), hjust = 0),
                       plot.tag.position = c(1, 1),
                       plot.tag = element_text(size = rel(1.2), hjust = 1, vjust = 1),
                       panel.grid.major.y = element_blank(),
@@ -1346,10 +1364,24 @@ app <- shinyApp(
                     text_hjust = if_else(is_short, -settings$text_displacement, 1 + settings$text_displacement)
                 )
             
+            
+            ## Titles
             left_title <- paste0("**Total:** ", prettyNum(sum(grouped_data$plays), big.mark = settings$thousands_sep), 
-                                 "   **Average:** ", round(sum(grouped_data$plays) / date_range_days, digits = 1), "/day")
+                                 "<span style='color: transparent;'>M</span>",
+                                 "**Average:** ", round(sum(grouped_data$plays) / date_range_days, digits = 1), "/day")
             right_title <- paste0(date_range[1], " to ", date_range[2])
             
+            art_val <- ifelse(is.null(input$subset_artist) || input$subset_artist == "", "All", input$subset_artist)
+            alb_val <- ifelse(is.null(input$subset_album) || input$subset_album == "", "All", input$subset_album)
+            tra_val <- ifelse(is.null(input$subset_track) || input$subset_track == "", "All", input$subset_track)
+            caption <- paste0("<b>Artist: </b>", art_val, "<br><b>Album: </b>", alb_val, "<br><b>Track: </b>", tra_val)
+            
+            if (!settings$show_title) {left_title <- NULL}
+            if (!settings$show_dates) {right_title <- NULL}
+            if (!settings$show_subset) {caption <- NULL}
+            
+            
+            ## Plot
             ggplot(grouped_data, aes(y = timepoint, x = plays)) +
                 geom_col(fill = settings$col_colour, col = settings$col_outline_colour, linewidth = settings$col_linewidth) +
                 geom_shadowtext(aes(label = prettyNum(plays, big.mark = settings$thousands_sep), hjust = text_hjust, col = as.character(is_short), bg.colour = as.character(is_short)), 
@@ -1358,9 +1390,10 @@ app <- shinyApp(
                 scale_discrete_manual(aesthetics = "bg.colour", values = c("TRUE" = alpha(settings$text_shadow_colour, settings$text_outside_shadow_alpha), "FALSE" = settings$text_shadow_colour)) +
                 scale_y_discrete(limits = rev) +
                 coord_cartesian(xlim = c(0, NA), expand = FALSE, clip = "off") +
-                labs(title = left_title, tag = right_title) +
+                labs(title = left_title, tag = right_title, caption = caption) +
                 theme_classic(base_size = settings$base_size) +
                 theme(plot.title = element_markdown(),
+                      plot.caption = element_markdown(size = rel(1), hjust = 0),
                       plot.tag.position = c(1, 1),
                       plot.tag = element_text(size = rel(1.2), hjust = 1, vjust = 1),
                       panel.grid.major.y = element_blank(),
