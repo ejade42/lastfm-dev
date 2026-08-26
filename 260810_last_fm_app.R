@@ -1247,7 +1247,8 @@ app <- shinyApp(
             tra_val <- ifelse(is.null(input$subset_track) || input$subset_track == "", "All", input$subset_track)
             caption <- paste0("<b>Artist: </b>", art_val, "<br><b>Album: </b>", alb_val, "<br><b>Track: </b>", tra_val)
             
-            if (!settings$show_title) {left_title <- NULL}
+            if (!settings$show_title & !settings$show_dates) {left_title <- NULL}
+            if (!settings$show_title & settings$show_dates) {left_title <- ""}
             if (!settings$show_dates) {right_title <- NULL}
             if (!settings$show_subset) {caption <- NULL}
             
@@ -1376,7 +1377,12 @@ app <- shinyApp(
             tra_val <- ifelse(is.null(input$subset_track) || input$subset_track == "", "All", input$subset_track)
             caption <- paste0("<b>Artist: </b>", art_val, "<br><b>Album: </b>", alb_val, "<br><b>Track: </b>", tra_val)
             
-            if (!settings$show_title) {left_title <- NULL}
+            title_element <- element_markdown()
+            if (!settings$show_title & !settings$show_dates) {left_title <- NULL}
+            if (!settings$show_title & settings$show_dates) {
+                left_title <- ""
+                title_element <- element_text()
+            }
             if (!settings$show_dates) {right_title <- NULL}
             if (!settings$show_subset) {caption <- NULL}
             
@@ -1392,7 +1398,7 @@ app <- shinyApp(
                 coord_cartesian(xlim = c(0, NA), expand = FALSE, clip = "off") +
                 labs(title = left_title, tag = right_title, caption = caption) +
                 theme_classic(base_size = settings$base_size) +
-                theme(plot.title = element_markdown(),
+                theme(plot.title = title_element,
                       plot.caption = element_markdown(size = rel(1), hjust = 0),
                       plot.tag.position = c(1, 1),
                       plot.tag = element_text(size = rel(1.2), hjust = 1, vjust = 1),
