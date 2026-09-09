@@ -152,14 +152,28 @@ last_fm_ui <- f7Page(
         )
     ),
 
-    f7Sheet(
-        id = "sheet_input",
-        orientation = "bottom",
+    customF7Popup(
+        "popup_input",
+        "Input",
         swipeToClose = TRUE,
         backdrop = TRUE,
-        f7BlockTitle("Select Input"),
         f7Block(
-            f7Text("input_csv", value = "https://raw.githubusercontent.com/ejade42/lastfm-dev/refs/heads/main/output_data/260810_music_data.csv")
+            shiny::markdown("***All select inputs will be merged***"),
+            settings_row(shiny::markdown("Use input from static file"), f7Checkbox("use_static_file", NULL, value = TRUE)),
+            conditionalPanel(
+                condition = "input.use_static_file == true",
+                settings_row(shiny::markdown("* *Static file input*"), f7Text("input_csv", NULL, value = "https://raw.githubusercontent.com/ejade42/lastfm-dev/refs/heads/main/output_data/260810_music_data.csv"))
+            ),
+
+            settings_row("Use input from last.fm", f7Checkbox("use_last_fm", NULL, value = TRUE)),
+            conditionalPanel(
+                condition = "input.use_last_fm == true",
+                settings_row(shiny::markdown("* *Last.fm input username*"), f7Text("last_fm_username", NULL, value = "apocalypso42")),
+                conditionalPanel(
+                    condition = "input.use_static_file == true",
+                    settings_row(shiny::markdown("* *Only use Last.fm data from after the fixed file*"), f7Checkbox("filter_last_fm_time", NULL, value = TRUE))
+                )
+            )
         )
     ),
     ## ---------------------------------------------------------------------

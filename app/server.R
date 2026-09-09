@@ -3,7 +3,7 @@ last_fm_server <- function(input, output, session) {
     observeEvent(input$btn_subset, { session$sendCustomMessage("open_f7_popup", "popup_subset") })
     observeEvent(input$btn_date, { session$sendCustomMessage("open_f7_popup", "popup_date") })
     observeEvent(input$btn_settings, { session$sendCustomMessage("open_f7_popup", "popup_settings") })
-    observeEvent(input$btn_input, { updateF7Sheet(id = "sheet_input") })
+    observeEvent(input$btn_input, { session$sendCustomMessage("open_f7_popup", "popup_input") })
 
     ## DATA LOADING
     ## ---------------------------------------------------------------------
