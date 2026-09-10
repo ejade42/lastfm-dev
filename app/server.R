@@ -889,7 +889,8 @@ last_fm_server <- function(input, output, session) {
             months_format = input$plot_months_format,
             years_format = input$plot_years_format,
             timestamp_format = input$plot_timestamp_format,
-            timestamp_displacement = input$plot_timestamp_displacement
+            timestamp_displacement = input$plot_timestamp_displacement,
+            over_time_image_type = input$plot_over_time_image_type
         )
     }) %>% bindEvent(full_data(), input$btn_apply_plot_settings, ignoreInit = FALSE)
 

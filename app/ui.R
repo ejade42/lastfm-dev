@@ -129,6 +129,7 @@ last_fm_ui <- f7Page(
             settings_row("Smart wrap max lines", f7Stepper("plot_smartwrap_max", NULL, min = 1, max = 10, value = 3, step = 1, manual = TRUE, decimalPoint = 0)),
             settings_row("Plot base size", f7Stepper("plot_base_size", NULL, min = 5, max = 50, value = 20, step = 1, manual = TRUE, decimalPoint = 0)),
             settings_row("Number text size", f7Stepper("plot_text_size", NULL, min = 0, max = 25, value = 10, step = 1, manual = TRUE, decimalPoint = 1)),
+            settings_row("Bar placeholder fill colour", f7ColorPicker("plot_col_colour", NULL, value = "#FF0000", modules = c("wheel", "hex"))),
             settings_row("Bar outline colour", f7ColorPicker("plot_col_outline_colour", NULL, value = "#000000", modules = c("wheel", "hex"))),
             settings_row("Bar outline linewidth", f7Stepper("plot_col_linewidth", NULL, min = 0, max = 3, value = 1, step = 0.1, manual = TRUE, decimalPoint = 1)),
             settings_row("Threshold for text being outside", f7Stepper("plot_text_outside_threshold", NULL, min = 0, max = 1, value = 0.15, step = 0.05, manual = TRUE, decimalPoint = 2)),
@@ -139,7 +140,6 @@ last_fm_ui <- f7Page(
             settings_row("Text shadow radius", f7Stepper("plot_text_shadow_radius", NULL, min = 0, max = 1, value = 0.1, step = 0.05, manual = TRUE, decimalPoint = 2)),
             settings_row("Outside text shadow alpha", f7Stepper("plot_text_outside_shadow_alpha", NULL, min = 0, max = 1, value = 0, step = 0.05, manual = TRUE, decimalPoint = 2)),
             h5("For 'Over time' plots only:"),
-            settings_row("Bar colour", f7ColorPicker("plot_col_colour", NULL, value = "#FF0000", modules = c("wheel", "hex"))),
             settings_row("Max days to draw as hours",  f7Stepper("plot_max_days_to_draw_as_hours",  NULL, min = 1, max = stepper_inf, value = 1,   step = 1,  manual = TRUE, decimalPoint = 0)),
             settings_row("Max days to draw as days",   f7Stepper("plot_max_days_to_draw_as_days",   NULL, min = 1, max = stepper_inf, value = 40,  step = 5,  manual = TRUE, decimalPoint = 0)),
             settings_row("Max days to draw as months", f7Stepper("plot_max_days_to_draw_as_months", NULL, min = 1, max = stepper_inf, value = 370, step = 10, manual = TRUE, decimalPoint = 0)),
@@ -148,6 +148,7 @@ last_fm_ui <- f7Page(
             settings_row("Months display format", f7Text("plot_months_format", NULL, value = "%b %Y", placeholder = "%b %Y")),
             settings_row("Years display format",  f7Text("plot_years_format",  NULL, value = "%Y", placeholder = "%Y")),
             h5("For 'Recents' plots only:"),
+            settings_row("Image to show", f7Select("plot_over_time_image_type", NULL, choices = c("Top Artist" = "artist", "Top Album" = "album", "Top Track" = "track", "Colour only" = "colour"), selected = "artist")),
             settings_row("Timestamp display format",  f7Text("plot_timestamp_format",  NULL, value = "%a %d %b %Y, %H:%M", placeholder = "%a %d %b %Y, %H:%M:%S")),
             settings_row("Timestamp text displacement", f7Stepper("plot_timestamp_displacement", NULL, min = 0, max = 1, value = 0.025, step = 0.005, manual = TRUE, decimalPoint = 3)),
             f7Button("btn_delete_image_cache", "Clear image cache", fill = TRUE)
