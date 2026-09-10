@@ -892,8 +892,78 @@ last_fm_server <- function(input, output, session) {
 
     ## GRAPHING
     ## ---------------------------------------------------------------------
+    ## In-memory image cache
+    image_cache <- reactiveVal(list())
+
+    get_entity_ids <- function(plot_data, entity) {
+        if (entity == "artist") {
+            plot_data$artist
+        } else if (entity == "album") {
+            paste(plot_data$artist, plot_data$album, sep = " - ")
+        } else {
+            paste(plot_data$artist, plot_data$track, sep = " - ")
+        }
+    }
+
+    # Helper to resolve existing disk images or memory cached images
+    resolve_image_path <- function(entity, artist, album = NULL, track = NULL, cache_map = list()) {
+        file_prefix <- stringr::str_replace_all(tolower(artist), "[^a-z0-9]", "_")
+        if (entity == "album") {
+            file_suffix <- stringr::str_replace_all(tolower(album), "[^a-z0-9]", "_")
+            type <- "album"
+            id <- paste(artist, album, sep = " - ")
+        } else if (entity == "track") {
+            file_suffix <- stringr::str_replace_all(tolower(track), "[^a-z0-9]", "_")
+            type <- "track"
+            id <- paste(artist, track, sep = " - ")
+        } else {
+            file_suffix <- "artist"
+            type <- "artist"
+            id <- artist
+        }
+
+        local_filename <- file.path(image_location, paste0(type, "_", file_prefix, "_", file_suffix, ".jpg"))
+
+        # 1. Check local disk first
+        if (file.exists(local_filename)) {
+            return(local_filename)
+        }
+
+        # 2. Check in-memory reactive cache second
+        cached_val <- cache_map[[id]]
+        if (!is.null(cached_val) && !is.na(cached_val) && cached_val != "") {
+            return(cached_val)
+        }
+
+        return(NA_character_)
+    }
+
+    trigger_parallel_image_fetch <- function(missing_data, entity) {
+        future_promise({
+            furrr::future_map_chr(seq_len(nrow(missing_data)), function(i) {
+                row <- missing_data[i, ]
+                url <- switch(
+                    entity,
+                    "artist" = get_image(artist = row$artist, size = 4),
+                    "album"  = get_image(artist = row$artist, album = row$album, size = 4),
+                    "track"  = get_image(artist = row$artist, track = row$track, size = 4)
+                )
+                if (is.na(url) || url == "") fallback_image else url
+            })
+        }) %...>% (function(fetched_urls) {
+            ids <- get_entity_ids(missing_data, entity)
+            new_entries <- setNames(as.list(fetched_urls), ids)
+
+            current_cache <- isolate(image_cache())
+            image_cache(c(current_cache, new_entries))
+        }) %...!% (function(err) { # Changed %...catch% to %...!%
+            if (verbose) print(paste("Error downloading images in background:", err$message))
+        })
+    }
+
+
     ## Reusable graph function
-    generate_entity_plot <- function(data, entity, settings, date_range) {
+    generate_entity_plot <- function(data, entity, settings, date_range, cache_list) {
 
         # 1. Dynamically select grouping columns
         group_cols <- if (entity == "artist") {
@@ -919,11 +989,22 @@ last_fm_server <- function(input, output, session) {
 
         max_plays <- ifelse(nrow(entity_data) > 0, max(plot_data$plays), 0)
 
+        # 4. Resolve image paths per row (Disk -> Memory -> NA)
+        plot_data$entity_id <- get_entity_ids(plot_data, entity)
+        plot_data$image_url <- purrr::map_chr(seq_len(nrow(plot_data)), function(i) {
+            row <- plot_data[i, ]
+            resolve_image_path(
+                entity = entity,
+                artist = row$artist,
+                album  = if (entity == "album") row$album else NULL,
+                track  = if (entity == "track") row$track else NULL,
+                cache_map = cache_list
+            )
+        })
 
-        # 4. Create labels
-        # 5. Dynamically fetch images based on the entity
-
+        # 5. Create labels and lock factor levels in exact rank order
         plot_data <- plot_data %>%
+            arrange(rank) %>%
             mutate(
                 label = if (entity == "artist") {
                     paste0(rank, "\\. **", smart_wrap(artist, settings$smartwrap_target, settings$smartwrap_max), "**")
@@ -931,21 +1012,24 @@ last_fm_server <- function(input, output, session) {
                     paste0(rank, "\\. **", smart_wrap(.data[[entity]], settings$smartwrap_target, settings$smartwrap_max),
                            "**<br>", smart_wrap(artist, settings$smartwrap_target, settings$smartwrap_max))
                 },
+                # rev() puts Rank 1 at the top of the y-axis scale
+                label = factor(label, levels = rev(label)),
                 is_short = plays < (max_plays * settings$text_outside_threshold),
-                text_hjust = if_else(is_short, -settings$text_displacement, 1 + settings$text_displacement),
-
-                image_url = switch(
-                    entity,
-                    "artist" = map_chr(artist, ~ get_image(artist = .x, size = 4)),
-                    "album"  = map2_chr(artist, album, ~ get_image(artist = .x, album = .y, size = 4)),
-                    "track"  = map2_chr(artist, track, ~ get_image(artist = .x, track = .y, size = 4))
-                ),
-                image_url = if_else(is.na(image_url) | image_url == "", fallback_image, image_url)
+                text_hjust = if_else(is_short, -settings$text_displacement, 1 + settings$text_displacement)
             )
+
+        # 6. Split dataset into present vs missing AFTER fixing factor levels
+        data_present <- plot_data %>% filter(!is.na(image_url) & image_url != "")
+        data_missing <- plot_data %>% filter(is.na(image_url) | image_url == "")
+
+        # Trigger background download ONLY for missing items
+        if (nrow(data_missing) > 0) {
+            trigger_parallel_image_fetch(data_missing, entity)
+        }
 
         if (verbose) {print(plot_data)}
 
-        # 6. Generate titles
+        # 7. Generate titles
         left_title <- stringr::str_to_title(entity)
         right_title <- paste0(date_range[1], " to ", date_range[2])
 
@@ -959,14 +1043,37 @@ last_fm_server <- function(input, output, session) {
         if (!settings$show_dates) {right_title <- NULL}
         if (!settings$show_subset) {caption <- NULL}
 
-        # 7. Generate the plot
-        ggplot(plot_data, aes(y = reorder(label, desc(rank)), x = plays)) +
-            geom_col_pattern(aes(pattern_filename = image_url), pattern = "image", pattern_type = "expand", col = settings$col_outline_colour, linewidth = settings$col_linewidth) +
+        # 8. Generate plot with hybrid layers
+        p <- ggplot(plot_data, aes(y = label, x = plays)) +
+            scale_y_discrete(limits = levels(plot_data$label), drop = FALSE)
+
+        # Layer 1: Solid placeholder bars for missing images
+        if (nrow(data_missing) > 0) {
+            p <- p + geom_col(
+                data = data_missing,
+                fill = settings$col_colour,
+                col = settings$col_outline_colour,
+                linewidth = settings$col_linewidth
+            )
+        }
+
+        # Layer 2: Image pattern bars for available images
+        if (nrow(data_present) > 0) {
+            p <- p + geom_col_pattern(
+                data = data_present,
+                aes(pattern_filename = image_url),
+                pattern = "image",
+                pattern_type = "expand",
+                col = settings$col_outline_colour,
+                linewidth = settings$col_linewidth
+            ) + scale_pattern_filename_identity()
+        }
+
+        p <- p +
             geom_shadowtext(aes(label = prettyNum(plays, big.mark = settings$thousands_sep), hjust = text_hjust, col = as.character(is_short), bg.colour = as.character(is_short)),
                             bg.r = settings$text_shadow_radius, size = settings$text_size) +
             scale_colour_manual(values = c("TRUE" = settings$text_outside_colour, "FALSE" = settings$text_inside_colour)) +
             scale_discrete_manual(aesthetics = "bg.colour", values = c("TRUE" = alpha(settings$text_shadow_colour, settings$text_outside_shadow_alpha), "FALSE" = settings$text_shadow_colour)) +
-            scale_pattern_filename_identity() +
             coord_cartesian(xlim = c(0, NA), expand = FALSE, clip = "off") +
             labs(title = left_title, tag = right_title, caption = caption) +
             theme_classic(base_size = settings$base_size) +
@@ -983,6 +1090,8 @@ last_fm_server <- function(input, output, session) {
                   axis.line = element_blank(),
                   axis.text.x = element_blank()) +
             guides(col = "none", bg.colour = "none")
+
+        return(p)
     }
 
 
@@ -994,7 +1103,8 @@ last_fm_server <- function(input, output, session) {
             data = subset_data(),
             entity = "track",
             settings = plot_settings(),
-            date_range = applied_date_range()
+            date_range = applied_date_range(),
+            cache_list = image_cache()
         )
     })
 
@@ -1005,7 +1115,8 @@ last_fm_server <- function(input, output, session) {
             data = subset_data(),
             entity = "album",
             settings = plot_settings(),
-            date_range = applied_date_range()
+            date_range = applied_date_range(),
+            cache_list = image_cache()
         )
     })
 
@@ -1016,7 +1127,8 @@ last_fm_server <- function(input, output, session) {
             data = subset_data(),
             entity = "artist",
             settings = plot_settings(),
-            date_range = applied_date_range()
+            date_range = applied_date_range(),
+            cache_list = image_cache()
         )
     })
 
