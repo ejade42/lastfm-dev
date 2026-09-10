@@ -15,6 +15,9 @@ library(memoise)
 library(shadowtext)
 library(cowplot)
 library(gridtext)
+library(future)
+library(promises)
+library(furrr)
 
 ## option for printing lots of debugging statements
 verbose <- TRUE
@@ -27,6 +30,9 @@ dir.create(image_location, recursive = TRUE, showWarnings = FALSE)
 ## do NOT end in a slash
 last_fm_cache_folder <- "app_cache/lastfm"
 dir.create(last_fm_cache_folder, recursive = TRUE, showWarnings = FALSE)
+
+## multithreading for slow image loading
+plan(multisession, workers = 2)
 
 fallback_image <- "fallback_image.jpg"
 
