@@ -18,6 +18,8 @@ library(gridtext)
 library(future)
 library(promises)
 library(furrr)
+library(shinyalert)
+library(shinyjs)
 
 ## option for printing lots of debugging statements
 verbose <- TRUE

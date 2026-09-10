@@ -262,3 +262,4 @@ smart_wrap <- function(text, target = 20, max_lines = 3, br = "<br>") {
         paste(best_lines, collapse = br)
     }, USE.NAMES = FALSE)
 }
+

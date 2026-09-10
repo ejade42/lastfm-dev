@@ -131,8 +131,20 @@ last_fm_server <- function(input, output, session) {
         }
     }, ignoreInit = TRUE)
 
+
     ## Rebuild cache
     observeEvent(input$btn_rebuild_last_fm_cache, {
+        if (verbose) print("Rebuild last.fm triggered", quote = FALSE)
+
+        shinyjs::runjs('
+        if (confirm("Are you sure you want to rebuild the last.fm cache? This may take some time")) {
+          Shiny.setInputValue("confirm_rebuild_last_fm_cache", true, {priority: "event"});
+        }
+      ')
+    }, ignoreInit = TRUE)
+
+    observeEvent(input$confirm_rebuild_last_fm_cache, {
+        if (verbose) print("Rebuild last.fm confirmed", quote = FALSE)
         req(isTRUE(input$use_last_fm), input$last_fm_username)
         cache_file <- get_lastfm_username_cache(last_fm_cache_folder, input$last_fm_username)
 
@@ -159,6 +171,8 @@ last_fm_server <- function(input, output, session) {
         if (verbose) print("Cache successfully rebuilt", quote = FALSE)
     }, ignoreInit = TRUE)
 
+
+    ## Load merged data
     ## Change all dates when timezone changes
     full_data <- reactive({
         if (verbose) {print("Full data initialising", quote = F)}
@@ -205,6 +219,25 @@ last_fm_server <- function(input, output, session) {
 
         if (verbose) {print("Full data sorted", quote = F)}
         full_data
+    })
+
+
+
+    ## Clear image cache
+    observeEvent(input$btn_delete_image_cache, {
+        if (verbose) print("Clear image cache triggered", quote = FALSE)
+
+        shinyjs::runjs('
+        if (confirm("Are you sure you want to clear the image cache?")) {
+          Shiny.setInputValue("confirm_delete_image_cache", true, {priority: "event"});
+        }
+      ')
+    }, ignoreInit = TRUE)
+
+    observeEvent(input$confirm_delete_image_cache, {
+        if (verbose) print("Clear image cache confirmed", quote = FALSE)
+
+        unlink(paste0(image_location, "/*"))
     })
     ## ---------------------------------------------------------------------
 

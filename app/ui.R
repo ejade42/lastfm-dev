@@ -1,4 +1,5 @@
 last_fm_ui <- f7Page(
+    useShinyjs(),
     tags$head(
         tags$script(HTML("
                 Shiny.addCustomMessageHandler('open_f7_popup', function(id) {
@@ -149,6 +150,7 @@ last_fm_ui <- f7Page(
             h5("For 'Recents' plots only:"),
             settings_row("Timestamp display format",  f7Text("plot_timestamp_format",  NULL, value = "%a %d %b %Y, %H:%M", placeholder = "%a %d %b %Y, %H:%M:%S")),
             settings_row("Timestamp text displacement", f7Stepper("plot_timestamp_displacement", NULL, min = 0, max = 1, value = 0.025, step = 0.005, manual = TRUE, decimalPoint = 3)),
+            f7Button("btn_delete_image_cache", "Clear image cache", fill = TRUE)
         )
     ),
 
