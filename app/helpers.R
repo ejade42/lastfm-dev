@@ -86,6 +86,68 @@ get_image <- function(artist, album = NULL, track = NULL, size = 4) {
     return(NA)
 }
 
+
+## Function for retrieving data from last.fm
+get_last_fm_data <- function(username, api_key, from_utc = NULL, to_utc = NULL) {
+    base_url <- "https://ws.audioscrobbler.com/2.0/"
+
+    ## Create params list for last.fm query
+    params <- list(
+        method = "user.getRecentTracks",
+        user = username,
+        api_key = api_key,
+        format = "json",
+        limit = 200
+    )
+
+    ## Add datetime constraints if present
+    if (!is.null(from_utc)) { params$from <- as.numeric(as.POSIXct(from_utc)) }
+    if (!is.null(to_utc))   { params$to   <- as.numeric(as.POSIXct(to_utc)) }
+
+    ## Get the first page of results
+    first_page_result <- GET(base_url, query = params)
+    first_page_result_data <- fromJSON(content(first_page_result, as = "text", encoding = "UTF-8"), flatten = TRUE)
+
+    ## Get the total number of pages of results
+    pages <- as.integer(first_page_result_data$recenttracks$`@attr`$totalPages %||% 1)
+    if (pages > 10) {
+        warning(paste("Large number of pages detected:", pages))
+    }
+
+    ## Function for making dataframe of the results for a given page
+    fetch_page <- function(page) {
+        p_params <- params
+        p_params$page <- page
+
+        p_res <- GET(base_url, query = p_params)
+        p_data <- jsonlite::fromJSON(content(p_res, as = "text", encoding = "UTF-8"), flatten = TRUE)
+
+        tracks <- p_data$recenttracks$track
+        if (is.null(tracks) || length(tracks) == 0) return(NULL)
+
+        as.data.frame(tracks)
+    }
+
+    ## Create dataframe
+    raw_merged_df <- map_dfr(1:pages, fetch_page)
+
+    ## Return placeholder
+    if (nrow(raw_merged_df) == 0) {
+        return(data.frame(artist = character(), album = character(), track = character(), utc_timestamp = numeric()))
+    }
+
+    ## Otherwise tidy up
+    raw_merged_df %>%
+        filter(!is.na(`date.uts`)) %>%  # Drops currently playing track (which lacks date.uts)
+        transmute(
+            artist        = `artist.#text`,
+            album         = `album.#text`,
+            track         = name,
+            datetime_utc  = as.numeric(`date.uts`)
+        )
+}
+
+
 ## Function for putting persistent popups into UI
 customF7Popup <- function(id, title, ..., close_text = "Close") {
     shiny::tags$div(

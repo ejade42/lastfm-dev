@@ -171,8 +171,9 @@ last_fm_ui <- f7Page(
                 settings_row(shiny::markdown("* *Last.fm input username*"), f7Text("last_fm_username", NULL, value = "apocalypso42")),
                 conditionalPanel(
                     condition = "input.use_static_file == true",
-                    settings_row(shiny::markdown("* *Only use Last.fm data from after the fixed file*"), f7Checkbox("filter_last_fm_time", NULL, value = TRUE))
-                )
+                    settings_row(shiny::markdown("* *Only use Last.fm data from after the fixed file - BE CAREFUL DISABLING*"), f7Checkbox("filter_last_fm_time", NULL, value = TRUE))
+                ),
+                f7Button("btn_update_last_fm", "Update Last.fm data", fill = TRUE)
             )
         )
     ),

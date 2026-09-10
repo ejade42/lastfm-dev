@@ -7,34 +7,95 @@ last_fm_server <- function(input, output, session) {
 
     ## DATA LOADING
     ## ---------------------------------------------------------------------
-    ## Load the data
-    raw_data <- reactive({
-        if (verbose) {print("Raw data initialising", quote = F)}
+    ## Load the static data
+    static_data <- reactive({
+        req(input$use_static_file == TRUE)
+
+        if (verbose) {print("Static data initialising", quote = F)}
         req(input$input_csv)
-        if (verbose) {print("Raw data req passed", quote = F)}
-        raw_data <- read.csv(input$input_csv) %>%
-            mutate(across(
-                c(artist, album, track),
-                ~ str_to_title(.) %>%
-                    str_replace_all('"', "'")
-            ))
-        if (verbose) {print("Raw data read", quote = F)}
-        raw_data
+        if (verbose) {print("Static data req passed", quote = F)}
+
+        static_data <- read.csv(input$input_csv)
+
+        if (verbose) {print("Static data read", quote = F)}
+        static_data
     }) %>% bindCache(input$input_csv, Sys.Date())
+
+    ## Store the value
+    latest_static_utc <- reactive({
+        if (verbose) {print("Fetching latest static utc", quote = F)}
+
+        df <- static_data()
+        if (is.null(df) || !"datetime_utc" %in% names(df)) return(NULL)
+        value <-max(as_datetime(df$datetime_utc), na.rm = TRUE)
+
+        if (verbose) {print("Fetched latest static utc", quote = F)}
+        value
+    })
+
+    ## Load the last.fm data
+    last_fm_data <- eventReactive(input$btn_update_last_fm, {
+        if (!isTRUE(input$use_last_fm) || is.null(input$last_fm_username) || input$last_fm_username == "") {
+            return(NULL)
+        }
+
+        if (verbose) {print("Last.fm data initialising", quote = F)}
+
+
+        ## here do a check for timestamp else set to NULL
+        if (isTRUE(input$filter_last_fm_time)) {
+            from_utc <- latest_static_utc()
+            if (verbose) print(paste0("Last.fm from timestamp: ", from_utc), quote = FALSE)
+        } else {
+            if (verbose) print("Using all last.fm data", quote = FALSE)
+        }
+
+        if (verbose) {print("Fetching last.fm data", quote = F)}
+        last_fm_data <- get_last_fm_data(username = input$last_fm_username, api_key = lastfm_api_key, from_utc = from_utc)
+
+        if (verbose) {print("Fetched last.fm data", quote = F)}
+        last_fm_data
+    }, ignoreInit = FALSE)
 
     ## Change all dates when timezone changes
     full_data <- reactive({
         if (verbose) {print("Full data initialising", quote = F)}
         req(input$selected_timezone)
         if (verbose) {print("Full data req passed", quote = F)}
-        full_data <- raw_data() %>%
+
+        ## Create correct merged dataset
+        if (input$use_static_file & input$use_last_fm) {
+            if (verbose) {print("Using static + last.fm data", quote = F)}
+            static <- static_data() %>% mutate(datetime_utc = as_datetime(datetime_utc))
+            last_fm <- last_fm_data() %>% mutate(datetime_utc = as_datetime(datetime_utc))
+            merged_data <- bind_rows(static, last_fm)
+        } else if (input$use_static_file) {
+            if (verbose) {print("Using static data only", quote = F)}
+            merged_data <- static_data() %>% mutate(datetime_utc = as_datetime(datetime_utc))
+        } else if (input$use_last_fm) {
+            if (verbose) {print("Using last.fm data only", quote = F)}
+            merged_data <- last_fm_data() %>% mutate(datetime_utc = as_datetime(datetime_utc))
+        } else {
+            if (verbose) {print("All data sources disabled", quote = F)}
+            merged_data <- data.frame(artist = character(), album = character(), track = character(), utc_timestamp = numeric())
+        }
+        if (verbose) {print("Merged data created", quote = F)}
+
+        full_data <- merged_data %>%
             select(datetime_utc, track, artist, album) %>%
             mutate(
                 datetime_utc = as_datetime(datetime_utc),
                 date    = as_date(datetime_utc, tz = input$selected_timezone),
                 year    = format(datetime_utc, "%Y", tz = input$selected_timezone),
-                utc_sec = as.numeric(datetime_utc)
+                utc_sec = as.numeric(datetime_utc),
+
+                across(
+                    c(artist, album, track),
+                    ~ str_to_title(.) %>%
+                        str_replace_all('"', "'")
+                )
             )
+
         if (verbose) {print("Full data read, sorting", quote = F)}
 
         full_data <- full_data %>%
