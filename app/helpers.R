@@ -86,6 +86,11 @@ get_image <- function(artist, album = NULL, track = NULL, size = 4) {
     return(NA)
 }
 
+## Function for storing a cache based on last.fm username
+get_lastfm_username_cache <- function(folder, username) {
+    clean_user <- gsub("[^A-Za-z0-9_-]", "_", tolower(trimws(username)))
+    paste0(folder, "/", clean_user, ".rds")
+}
 
 ## Function for retrieving data from last.fm
 get_last_fm_data <- function(username, api_key, from_utc = NULL, to_utc = NULL) {

@@ -147,7 +147,7 @@ last_fm_ui <- f7Page(
             settings_row("Months display format", f7Text("plot_months_format", NULL, value = "%b %Y", placeholder = "%b %Y")),
             settings_row("Years display format",  f7Text("plot_years_format",  NULL, value = "%Y", placeholder = "%Y")),
             h5("For 'Recents' plots only:"),
-            settings_row("Timestamp display format",  f7Text("plot_timestamp_format",  NULL, value = "%a %d %b %Y, %H:%M:%S", placeholder = "%a %d %b %Y, %H:%M:%S")),
+            settings_row("Timestamp display format",  f7Text("plot_timestamp_format",  NULL, value = "%a %d %b %Y, %H:%M", placeholder = "%a %d %b %Y, %H:%M:%S")),
             settings_row("Timestamp text displacement", f7Stepper("plot_timestamp_displacement", NULL, min = 0, max = 1, value = 0.025, step = 0.005, manual = TRUE, decimalPoint = 3)),
         )
     ),
@@ -158,7 +158,7 @@ last_fm_ui <- f7Page(
         swipeToClose = TRUE,
         backdrop = TRUE,
         f7Block(
-            shiny::markdown("***All select inputs will be merged***"),
+            div(style = "margin-top: -60px;", shiny::markdown("***All select inputs will be merged***")),
             settings_row(shiny::markdown("Use input from static file"), f7Checkbox("use_static_file", NULL, value = TRUE)),
             conditionalPanel(
                 condition = "input.use_static_file == true",
@@ -173,7 +173,9 @@ last_fm_ui <- f7Page(
                     condition = "input.use_static_file == true",
                     settings_row(shiny::markdown("* *Only use Last.fm data from after the fixed file - BE CAREFUL DISABLING*"), f7Checkbox("filter_last_fm_time", NULL, value = TRUE))
                 ),
-                f7Button("btn_update_last_fm", "Update Last.fm data", fill = TRUE)
+                f7Button("btn_update_last_fm_cache", "Update Last.fm data", fill = TRUE),
+                uiOutput("last_fm_cache_info"),
+                f7Button("btn_rebuild_last_fm_cache", "Rebuild Last.fm data (warning: SLOW)", fill = TRUE)
             )
         )
     ),

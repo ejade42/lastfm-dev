@@ -24,6 +24,11 @@ shinyOptions(cache = cache_disk("./app_cache", max_age = 86400))
 ## do NOT end in a slash
 image_location <- "app_cache/images"
 dir.create(image_location, recursive = TRUE, showWarnings = FALSE)
+## do NOT end in a slash
+last_fm_cache_folder <- "app_cache/lastfm"
+dir.create(last_fm_cache_folder, recursive = TRUE, showWarnings = FALSE)
+
+fallback_image <- "fallback_image.jpg"
 
 lastfm_api_key <- readLines("api_lastfm.key")
 spotify_client_id <- readLines("api_spotify.key")[1]

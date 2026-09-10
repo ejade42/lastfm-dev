@@ -34,28 +34,130 @@ last_fm_server <- function(input, output, session) {
     })
 
     ## Load the last.fm data
-    last_fm_data <- eventReactive(input$btn_update_last_fm, {
-        if (!isTRUE(input$use_last_fm) || is.null(input$last_fm_username) || input$last_fm_username == "") {
-            return(NULL)
-        }
+    last_fm_cache <- reactiveVal({
+        data.frame(artist = character(), album = character(), track = character(), datetime_utc = as_datetime(character()))
+    })
 
-        if (verbose) {print("Last.fm data initialising", quote = F)}
+    observeEvent(input$last_fm_username, {
+        req(input$last_fm_username != "")
 
+        cache_file <- get_lastfm_username_cache(last_fm_cache_folder, input$last_fm_username)
 
-        ## here do a check for timestamp else set to NULL
-        if (isTRUE(input$filter_last_fm_time)) {
-            from_utc <- latest_static_utc()
-            if (verbose) print(paste0("Last.fm from timestamp: ", from_utc), quote = FALSE)
+        if (file.exists(cache_file)) {
+            if (verbose) print(paste("Loading cache for user:", input$last_fm_username), quote = FALSE)
+            last_fm_cache(readRDS(cache_file))
         } else {
-            if (verbose) print("Using all last.fm data", quote = FALSE)
+            if (verbose) print(paste("No cache found for user:", input$last_fm_username, "- starting empty"), quote = FALSE)
+            last_fm_cache(
+                data.frame(artist = character(), album = character(), track = character(), datetime_utc = as_datetime(character()))
+            )
+        }
+    }, ignoreNULL = TRUE)
+
+    ## Update the button with the most recent cached scrobble
+    output$last_fm_cache_info <- renderUI({
+        req(isTRUE(input$use_last_fm), input$last_fm_username)
+
+        cache_file <- get_lastfm_username_cache(last_fm_cache_folder, input$last_fm_username)
+        df <- last_fm_cache()
+
+        if (!is.null(df) && nrow(df) > 0 && !all(is.na(df$datetime_utc))) {
+            latest_utc <- max(df$datetime_utc, na.rm = TRUE)
+            oldest_utc <- min(df$datetime_utc, na.rm = TRUE)
+
+            # Convert to selected timezone or default to UTC
+            tz <- if (!is.null(input$selected_timezone)) { input$selected_timezone } else  { "UTC" }
+            formatted_latest <- format(as_datetime(latest_utc, tz = tz), input$plot_timestamp_format)
+            formatted_oldest <- format(as_datetime(oldest_utc, tz = tz), input$plot_timestamp_format)
+
+
+            HTML(paste0(
+                "<table style='margin: 10px 0; font-size: 0.85em; color: #666; border-collapse: collapse;'>",
+                "<tr>",
+                "<td style='text-align: right; font-weight: bold; padding-right: 8px; vertical-align: middle;'>Latest scrobble:</td>",
+                "<td style='text-align: left; font-family: monospace; vertical-align: middle;'>", formatted_latest, "</td>",
+                "</tr>",
+                "<tr>",
+                "<td style='text-align: right; font-weight: bold; padding-right: 8px; vertical-align: middle;'>Oldest scrobble:</td>",
+                "<td style='text-align: left; font-family: monospace; vertical-align: middle;'>", formatted_oldest, "</td>",
+                "</tr>",
+                "</table>"
+            ))
+        } else {
+            HTML(paste0("<div style='margin: 10px 0; font-size: 0.85em; color: #999;'><i>No cached Last.fm data available for user: '", input$last_fm_username, "'</i></div>"))
+        }
+    })
+
+    ## Update cache incrementally
+    observeEvent(input$btn_update_last_fm_cache, {
+        req(isTRUE(input$use_last_fm), input$last_fm_username)
+        cache_file <- get_lastfm_username_cache(last_fm_cache_folder, input$last_fm_username)
+
+        if (verbose) print(paste("Updating Last.fm cache incrementally for user:", input$last_fm_username), quote = FALSE)
+
+        current_cache <- last_fm_cache()
+
+        # Get latest cached timestamp in epoch seconds
+        cached_sec <- if (!is.null(current_cache) && nrow(current_cache) > 0 && !all(is.na(current_cache$datetime_utc))) {
+            as.numeric(max(current_cache$datetime_utc, na.rm = TRUE))
+        } else { NULL }
+
+        # Get static limit if enabled
+        static_sec <- if (isTRUE(input$filter_last_fm_time)) {
+            as.numeric(latest_static_utc())
+        } else { NULL }
+
+        # Determine start timestamp (+1 second after the latest cached scrobble to prevent duplicates)
+        from_utc <- max(c(if (!is.null(cached_sec)) {cached_sec + 1} else {NULL}, static_sec + 1), na.rm = TRUE)
+        if (is.infinite(from_utc) || is.na(from_utc)) {from_utc <- NULL}
+
+        new_data <- get_last_fm_data(
+            username = input$last_fm_username,
+            api_key  = lastfm_api_key,
+            from_utc = from_utc
+        )
+
+        if (!is.null(new_data) && nrow(new_data) > 0) {
+            new_data <- new_data %>% mutate(datetime_utc = as_datetime(datetime_utc))
+
+            updated_cache <- bind_rows(current_cache, new_data) %>%
+                distinct(datetime_utc, track, artist, .keep_all = TRUE)
+
+            saveRDS(updated_cache, cache_file)
+            last_fm_cache(updated_cache)
+            if (verbose) print(paste("Added", nrow(new_data), "tracks to cache"), quote = FALSE)
+        } else {
+            if (verbose) print("No new scrobbles found", quote = FALSE)
+        }
+    }, ignoreInit = TRUE)
+
+    ## Rebuild cache
+    observeEvent(input$btn_rebuild_last_fm_cache, {
+        req(isTRUE(input$use_last_fm), input$last_fm_username)
+        cache_file <- get_lastfm_username_cache(last_fm_cache_folder, input$last_fm_username)
+
+        if (verbose) print(paste("Rebuilding Last.fm cache from scratch for user:", input$last_fm_username), quote = FALSE)
+
+        from_utc <- if (isTRUE(input$filter_last_fm_time)) latest_static_utc() else NULL
+
+        rebuilt_data <- get_last_fm_data(
+            username = input$last_fm_username,
+            api_key  = lastfm_api_key,
+            from_utc = from_utc
+        )
+
+        if (!is.null(rebuilt_data) && nrow(rebuilt_data) > 0) {
+            rebuilt_data <- rebuilt_data %>% mutate(datetime_utc = as_datetime(datetime_utc))
+        } else {
+            rebuilt_data <- data.frame(
+                artist = character(), album = character(), track = character(), datetime_utc = as_datetime(character())
+            )
         }
 
-        if (verbose) {print("Fetching last.fm data", quote = F)}
-        last_fm_data <- get_last_fm_data(username = input$last_fm_username, api_key = lastfm_api_key, from_utc = from_utc)
-
-        if (verbose) {print("Fetched last.fm data", quote = F)}
-        last_fm_data
-    }, ignoreInit = FALSE)
+        saveRDS(rebuilt_data, cache_file)
+        last_fm_cache(rebuilt_data)
+        if (verbose) print("Cache successfully rebuilt", quote = FALSE)
+    }, ignoreInit = TRUE)
 
     ## Change all dates when timezone changes
     full_data <- reactive({
@@ -67,17 +169,17 @@ last_fm_server <- function(input, output, session) {
         if (input$use_static_file & input$use_last_fm) {
             if (verbose) {print("Using static + last.fm data", quote = F)}
             static <- static_data() %>% mutate(datetime_utc = as_datetime(datetime_utc))
-            last_fm <- last_fm_data() %>% mutate(datetime_utc = as_datetime(datetime_utc))
+            last_fm <- last_fm_cache() %>% mutate(datetime_utc = as_datetime(datetime_utc))
             merged_data <- bind_rows(static, last_fm)
         } else if (input$use_static_file) {
             if (verbose) {print("Using static data only", quote = F)}
             merged_data <- static_data() %>% mutate(datetime_utc = as_datetime(datetime_utc))
         } else if (input$use_last_fm) {
             if (verbose) {print("Using last.fm data only", quote = F)}
-            merged_data <- last_fm_data() %>% mutate(datetime_utc = as_datetime(datetime_utc))
+            merged_data <- last_fm_cache() %>% mutate(datetime_utc = as_datetime(datetime_utc))
         } else {
             if (verbose) {print("All data sources disabled", quote = F)}
-            merged_data <- data.frame(artist = character(), album = character(), track = character(), utc_timestamp = numeric())
+            merged_data <- data.frame(artist = character(), album = character(), track = character(), datetime_utc = numeric())
         }
         if (verbose) {print("Merged data created", quote = F)}
 
@@ -820,7 +922,6 @@ last_fm_server <- function(input, output, session) {
 
         # 4. Create labels
         # 5. Dynamically fetch images based on the entity
-        fallback_image <- "fallback_image.jpg"
 
         plot_data <- plot_data %>%
             mutate(
@@ -1053,7 +1154,8 @@ last_fm_server <- function(input, output, session) {
                 label = paste0(rank, "\\. **", smart_wrap(track, settings$smartwrap_target, settings$smartwrap_max),
                                "**<br>", smart_wrap(artist, settings$smartwrap_target, settings$smartwrap_max)),
                 nice_timestamp = format(as_datetime(datetime_utc, tz = selected_timezone), format = settings$timestamp_format),
-                image_url = map2_chr(artist, track, ~ get_image(artist = .x, track = .y, size = 4))
+                image_url = map2_chr(artist, track, ~ get_image(artist = .x, track = .y, size = 4)),
+                image_url = if_else(is.na(image_url) | image_url == "", fallback_image, image_url)
             )
 
         if (verbose) {print(plot_data)}
