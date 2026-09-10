@@ -905,7 +905,7 @@ last_fm_server <- function(input, output, session) {
         }
     }
 
-    # Helper to resolve existing disk images or memory cached images
+    ## Helper to resolve existing disk images or memory cached images
     resolve_image_path <- function(entity, artist, album = NULL, track = NULL, cache_map = list()) {
         file_prefix <- stringr::str_replace_all(tolower(artist), "[^a-z0-9]", "_")
         if (entity == "album") {
@@ -938,6 +938,7 @@ last_fm_server <- function(input, output, session) {
         return(NA_character_)
     }
 
+    ## Function for fetching images via API in the background
     trigger_parallel_image_fetch <- function(missing_data, entity) {
         future_promise({
             furrr::future_map_chr(seq_len(nrow(missing_data)), function(i) {
@@ -1243,36 +1244,54 @@ last_fm_server <- function(input, output, session) {
         req(input$tabs == "Recents")
         if (verbose) {print("Tab selected: Recents")}
 
-        ## Subset data and make sure to put it in reverse time order
+        ## 1. Subset data and establish rank
         subset_data <- subset_data() %>%
             mutate(rank = row_number())
         settings <- plot_settings()
-
         selected_timezone <- input$selected_timezone %||% Sys.timezone()
-
         date_range <- applied_date_range()
 
         idx <- settings$graph_rows
-        if (verbose) {print(paste0("Graph rows: ", idx[1], "-", idx[2]), quote = FALSE)}
-        if (verbose) {print(paste0("Input plot start: ", input$plot_start))}
-        if (verbose) {print(paste0("Input plot count: ", input$plot_count))}
         max_row <- min(idx[2], nrow(subset_data))
-
-        if (verbose) {print("Creating plot data", quote = FALSE)}
         plot_data <- subset_data[idx[1]:max_row, ]
+        req(nrow(plot_data) > 0)
 
+        # 2. Resolve image paths per row (Disk -> Memory -> NA)
+        cache_list <- image_cache()
+        plot_data$entity_id <- get_entity_ids(plot_data, "track")
+        plot_data$image_url <- purrr::map_chr(seq_len(nrow(plot_data)), function(i) {
+            row <- plot_data[i, ]
+            resolve_image_path(
+                entity = "track",
+                artist = row$artist,
+                track  = row$track,
+                cache_map = cache_list
+            )
+        })
+
+        # 3. Create labels and lock factor levels in exact rank order
         plot_data <- plot_data %>%
+            arrange(rank) %>%
             mutate(
                 label = paste0(rank, "\\. **", smart_wrap(track, settings$smartwrap_target, settings$smartwrap_max),
                                "**<br>", smart_wrap(artist, settings$smartwrap_target, settings$smartwrap_max)),
-                nice_timestamp = format(as_datetime(datetime_utc, tz = selected_timezone), format = settings$timestamp_format),
-                image_url = map2_chr(artist, track, ~ get_image(artist = .x, track = .y, size = 4)),
-                image_url = if_else(is.na(image_url) | image_url == "", fallback_image, image_url)
+                # rev() ensures Rank 1 stays at the top of the y-axis
+                label = factor(label, levels = rev(label)),
+                nice_timestamp = format(as_datetime(datetime_utc, tz = selected_timezone), format = settings$timestamp_format)
             )
+
+        # 4. Split dataset into present vs missing AFTER locking factor levels
+        data_present <- plot_data %>% filter(!is.na(image_url) & image_url != "")
+        data_missing <- plot_data %>% filter(is.na(image_url) | image_url == "")
+
+        # Trigger background download ONLY for missing items
+        if (nrow(data_missing) > 0) {
+            trigger_parallel_image_fetch(data_missing, "track")
+        }
 
         if (verbose) {print(plot_data)}
 
-        # 6. Generate titles
+        # 5. Generate titles
         left_title <- "Recents"
         right_title <- paste0(date_range[1], " to ", date_range[2])
 
@@ -1286,14 +1305,35 @@ last_fm_server <- function(input, output, session) {
         if (!settings$show_dates) {right_title <- NULL}
         if (!settings$show_subset) {caption <- NULL}
 
-        if (verbose) {print("Just before recents plot", quote = FALSE)}
+        # 6. Generate plot with locked discrete scale
+        p <- ggplot(plot_data, aes(y = label, x = 1)) +
+            scale_y_discrete(limits = levels(plot_data$label), drop = FALSE)
 
-        # 7. Generate the plot
-        ggplot(plot_data, aes(y = reorder(label, desc(rank)), x = 1)) +
-            geom_col_pattern(aes(pattern_filename = image_url), pattern = "image", pattern_type = "expand", col = settings$col_outline_colour, linewidth = settings$col_linewidth) +
+        # Layer 1: Solid placeholder bars for missing images
+        if (nrow(data_missing) > 0) {
+            p <- p + geom_col(
+                data = data_missing,
+                fill = settings$col_colour,
+                col = settings$col_outline_colour,
+                linewidth = settings$col_linewidth
+            )
+        }
+
+        # Layer 2: Image pattern bars for available images
+        if (nrow(data_present) > 0) {
+            p <- p + geom_col_pattern(
+                data = data_present,
+                aes(pattern_filename = image_url),
+                pattern = "image",
+                pattern_type = "expand",
+                col = settings$col_outline_colour,
+                linewidth = settings$col_linewidth
+            ) + scale_pattern_filename_identity()
+        }
+
+        p <- p +
             geom_shadowtext(aes(label = nice_timestamp), col = settings$text_inside_colour, bg.colour = settings$text_shadow_colour,
                             hjust = 1 + settings$timestamp_displacement, bg.r = settings$text_shadow_radius, size = settings$text_size) +
-            scale_pattern_filename_identity() +
             coord_cartesian(xlim = c(0, NA), expand = FALSE, clip = "off") +
             labs(title = left_title, tag = right_title, caption = caption) +
             theme_classic(base_size = settings$base_size) +
@@ -1310,6 +1350,8 @@ last_fm_server <- function(input, output, session) {
                   axis.line = element_blank(),
                   axis.text.x = element_blank()) +
             guides(col = "none", bg.colour = "none")
+
+        return(p)
     })
     ## ---------------------------------------------------------------------
 }
