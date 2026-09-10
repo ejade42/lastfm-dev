@@ -1252,7 +1252,12 @@ last_fm_server <- function(input, output, session) {
         date_range <- applied_date_range()
 
         idx <- settings$graph_rows
+        if (verbose) {print(paste0("Graph rows: ", idx[1], "-", idx[2]), quote = FALSE)}
+        if (verbose) {print(paste0("Input plot start: ", input$plot_start))}
+        if (verbose) {print(paste0("Input plot count: ", input$plot_count))}
         max_row <- min(idx[2], nrow(subset_data))
+
+        if (verbose) {print("Creating plot data", quote = FALSE)}
         plot_data <- subset_data[idx[1]:max_row, ]
         req(nrow(plot_data) > 0)
 
