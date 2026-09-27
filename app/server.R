@@ -1229,215 +1229,6 @@ last_fm_server <- function(input, output, session) {
                     select(timepoint, artist, album)
 
             } else if (image_type == "track") {
-                # Find top track per timepoint by play count
-                top_tracks <- subset_data %>%
-                    filter(!is.na(artist) & artist != "" & !is.na(track) & track != "") %>%
-                    count(timepoint, artist, track, name = "n") %>%
-                    group_by(timepoint) %>%
-                    slice_max(n, n = 1, with_ties = FALSE) %>%
-                    ungroup() %>%
-                    select(timepoint, artist, track)
-
-                # Attach most frequent album for that specific winning track
-                top_entities <- top_tracks %>%
-                    left_join(
-                        subset_data %>%
-                            filter(!is.na(album) & album != "") %>%
-                            count(timepoint, artist, track, album, name = "alb_n") %>%
-                            group_by(timepoint, artist, track) %>%
-                            slice_max(alb_n, n = 1, with_ties = FALSE) %>%
-                            ungroup() %>%
-                            select(timepoint, artist, track, album),
-                        by = c("timepoint", "artist", "track")
-                    )
-            }
-
-            grouped_data <- grouped_data %>%
-                left_join(top_entities, by = "timepoint")
-        }
-
-        # Guarantee column structures
-        if (!"artist" %in% names(grouped_data)) grouped_data$artist <- NA_character_
-        if (!"album"  %in% names(grouped_data)) grouped_data$album  <- NA_character_
-        if (!"track"  %in% names(grouped_data)) grouped_data$track  <- NA_character_
-
-        # Resolve image paths ONLY for the 1 item per timepoint
-        if (image_type != "colour") {
-            cache_list <- image_cache()
-            grouped_data$entity_id <- get_entity_ids(grouped_data, image_type)
-            grouped_data$image_url <- purrr::map_chr(seq_len(nrow(grouped_data)), function(i) {
-                row <- grouped_data[i, ]
-                if (is.na(row$artist) || row$plays == 0) return(NA_character_)
-                resolve_image_path(
-                    entity    = image_type,
-                    artist    = row$artist,
-                    album     = row$album,
-                    track     = row$track,
-                    cache_map = cache_list
-                )
-            })
-        } else {
-            grouped_data$image_url <- NA_character_
-        }
-
-        # Lock timepoint factor ordering
-        grouped_data$timepoint <- factor(grouped_data$timepoint, levels = all_timepoints)
-
-        ## 4. Text displacement
-        grouped_data$max_plays <- ifelse(nrow(grouped_data) > 0, max(grouped_data$plays), 0)
-        grouped_data <- grouped_data %>%
-            mutate(
-                is_short = plays < (max_plays * settings$text_outside_threshold),
-                text_hjust = if_else(is_short, -settings$text_displacement, 1 + settings$text_displacement)
-            )
-
-        ## 5. Separate image vs missing layers & trigger background fetch for missing artwork
-        data_present <- grouped_data %>% filter(!is.na(image_url) & image_url != "")
-        data_missing <- grouped_data %>% filter(is.na(image_url) | image_url == "")
-
-        if (image_type != "colour") {
-            missing_to_fetch <- data_missing %>% filter(!is.na(artist) & plays > 0)
-            if (nrow(missing_to_fetch) > 0) {
-                trigger_parallel_image_fetch(missing_to_fetch, image_type)
-            }
-        }
-
-        ## 6. Titles
-        left_title <- paste0("**Total:** ", prettyNum(sum(grouped_data$plays), big.mark = settings$thousands_sep),
-                             "<span style='color: transparent;'>M</span>",
-                             "**Average:** ", round(sum(grouped_data$plays) / date_range_days, digits = 1), "/day")
-        right_title <- paste0(date_range[1], " to ", date_range[2])
-
-        art_val <- ifelse(is.null(input$subset_artist) || input$subset_artist == "", "All", input$subset_artist)
-        alb_val <- ifelse(is.null(input$subset_album) || input$subset_album == "", "All", input$subset_album)
-        tra_val <- ifelse(is.null(input$subset_track) || input$subset_track == "", "All", input$subset_track)
-        caption <- paste0("<b>Artist: </b>", art_val, "<br><b>Album: </b>", alb_val, "<br><b>Track: </b>", tra_val)
-
-        title_element <- element_markdown()
-        if (!settings$show_title & !settings$show_dates) {left_title <- NULL}
-        if (!settings$show_title & settings$show_dates) {
-            left_title <- ""
-            title_element <- element_text()
-        }
-        if (!settings$show_dates) {right_title <- NULL}
-        if (!settings$show_subset) {caption <- NULL}
-
-        ## 7. Render plot
-        p <- ggplot(grouped_data, aes(y = timepoint, x = plays)) +
-            scale_y_discrete(limits = rev(all_timepoints), drop = FALSE)
-
-        # Layer 1: Solid color bars for missing artwork or "Colour only" mode
-        if (nrow(data_missing) > 0) {
-            p <- p + geom_col(
-                data = data_missing,
-                fill = settings$col_colour,
-                col = settings$col_outline_colour,
-                linewidth = settings$col_linewidth
-            )
-        }
-
-        # Layer 2: Pattern image bars for available artwork
-        if (nrow(data_present) > 0) {
-            p <- p + geom_col_pattern(
-                data = data_present,
-                aes(pattern_filename = image_url),
-                pattern = "image",
-                pattern_type = "expand",
-                col = settings$col_outline_colour,
-                linewidth = settings$col_linewidth
-            ) + scale_pattern_filename_identity()
-        }
-
-        p <- p +
-            geom_shadowtext(aes(label = prettyNum(plays, big.mark = settings$thousands_sep), hjust = text_hjust, col = as.character(is_short), bg.colour = as.character(is_short)),
-                            bg.r = settings$text_shadow_radius, size = settings$text_size) +
-            scale_colour_manual(values = c("TRUE" = settings$text_outside_colour, "FALSE" = settings$text_inside_colour)) +
-            scale_discrete_manual(aesthetics = "bg.colour", values = c("TRUE" = alpha(settings$text_shadow_colour, settings$text_outside_shadow_alpha), "FALSE" = settings$text_shadow_colour)) +
-            coord_cartesian(xlim = c(0, NA), expand = FALSE, clip = "off") +
-            labs(title = left_title, tag = right_title, caption = caption) +
-            theme_classic(base_size = settings$base_size) +
-            theme(plot.title = title_element,
-                  plot.caption = element_markdown(size = rel(1), hjust = 0),
-                  plot.tag.position = c(1, 1),
-                  plot.tag = element_text(size = rel(1.2), hjust = 1, vjust = 1),
-                  panel.grid.major.y = element_blank(),
-                  panel.grid.minor.y = element_blank(),
-                  panel.border = element_blank(),
-                  axis.title = element_blank(),
-                  axis.text.y = element_markdown(),
-                  axis.ticks = element_blank(),
-                  axis.line = element_blank(),
-                  axis.text.x = element_blank()) +
-            guides(col = "none", bg.colour = "none")
-
-        return(p)
-    })
-
-
-
-
-    output$over_time_graph <- renderPlot({
-        req(input$tabs == "Over_time")
-        if (verbose) {print("Tab selected: Over time")}
-
-        subset_data <- subset_data()
-        settings <- plot_settings()
-        selected_timezone <- input$selected_timezone %||% Sys.timezone()
-        date_range <- applied_date_range()
-        date_range_days <- lubridate::interval(date_range[1], date_range[2]) %/% days(1) + 1
-        image_type <- input$plot_over_time_image_type %||% "colour"
-
-        ## 1. Generate all timepoints for axis alignment
-        if (date_range_days <= settings$max_days_to_draw_as_hours) {
-            all_timepoints <- format(seq(as_datetime(floor_date(date_range[1], "day"), tz = selected_timezone),
-                                         as_datetime(ceiling_date(date_range[2], "day"), tz = selected_timezone) - seconds(1),
-                                         by = "hour"), format = settings$hours_format)
-            subset_data$timepoint <- format(as_datetime(subset_data$datetime_utc, tz = selected_timezone), format = settings$hours_format)
-
-        } else if (date_range_days <= settings$max_days_to_draw_as_days) {
-            all_timepoints <- format(seq(date_range[1], date_range[2], by = "day"), format = settings$days_format)
-            subset_data$timepoint <- format(as_datetime(subset_data$datetime_utc, tz = selected_timezone), format = settings$days_format)
-
-        } else if (date_range_days <= settings$max_days_to_draw_as_months) {
-            all_timepoints <- format(seq(floor_date(date_range[1], "month"),
-                                         floor_date(date_range[2], "month"),
-                                         by = "month"), format = settings$months_format)
-            subset_data$timepoint <- format(as_datetime(subset_data$datetime_utc, tz = selected_timezone), format = settings$months_format)
-
-        } else {
-            all_timepoints <- format(seq(floor_date(date_range[1], "year"),
-                                         floor_date(date_range[2], "year"),
-                                         by = "year"), format = settings$years_format)
-            subset_data$timepoint <- format(as_datetime(subset_data$datetime_utc, tz = selected_timezone), format = settings$years_format)
-        }
-
-        ## 2. Base aggregation by timepoint (Strictly 1 row per timepoint)
-        grouped_data <- subset_data %>%
-            group_by(timepoint) %>%
-            summarise(plays = n(), .groups = "drop") %>%
-            complete(timepoint = all_timepoints, fill = list(plays = 0))
-
-        ## 3. Find EXACTLY 1 top entity per timepoint
-        if (image_type != "colour" && nrow(subset_data) > 0) {
-            if (image_type == "artist") {
-                top_entities <- subset_data %>%
-                    filter(!is.na(artist) & artist != "") %>%
-                    count(timepoint, artist, name = "n") %>%
-                    group_by(timepoint) %>%
-                    slice_max(n, n = 1, with_ties = FALSE) %>%
-                    ungroup() %>%
-                    select(timepoint, artist)
-
-            } else if (image_type == "album") {
-                top_entities <- subset_data %>%
-                    filter(!is.na(artist) & artist != "" & !is.na(album) & album != "") %>%
-                    count(timepoint, artist, album, name = "n") %>%
-                    group_by(timepoint) %>%
-                    slice_max(n, n = 1, with_ties = FALSE) %>%
-                    ungroup() %>%
-                    select(timepoint, artist, album)
-
-            } else if (image_type == "track") {
                 # Find top track per timepoint
                 top_tracks <- subset_data %>%
                     filter(!is.na(artist) & artist != "" & !is.na(track) & track != "") %>%
@@ -1592,6 +1383,128 @@ last_fm_server <- function(input, output, session) {
             labs(title = left_title, tag = right_title, caption = caption) +
             theme_classic(base_size = settings$base_size) +
             theme(plot.title = title_element,
+                  plot.caption = element_markdown(size = rel(1), hjust = 0),
+                  plot.tag.position = c(1, 1),
+                  plot.tag = element_text(size = rel(1.2), hjust = 1, vjust = 1),
+                  panel.grid.major.y = element_blank(),
+                  panel.grid.minor.y = element_blank(),
+                  panel.border = element_blank(),
+                  axis.title = element_blank(),
+                  axis.text.y = element_markdown(),
+                  axis.ticks = element_blank(),
+                  axis.line = element_blank(),
+                  axis.text.x = element_blank()) +
+            guides(col = "none", bg.colour = "none")
+
+        return(p)
+    })
+
+
+
+
+    output$recents_graph <- renderPlot({
+        req(input$tabs == "Recents")
+        if (verbose) {print("Tab selected: Recents")}
+
+        ## 1. Subset data and establish rank
+        subset_data <- subset_data() %>%
+            mutate(rank = row_number())
+        settings <- plot_settings()
+        selected_timezone <- input$selected_timezone %||% Sys.timezone()
+        date_range <- applied_date_range()
+
+        idx <- settings$graph_rows
+        if (verbose) {print(paste0("Graph rows: ", idx[1], "-", idx[2]), quote = FALSE)}
+        if (verbose) {print(paste0("Input plot start: ", input$plot_start))}
+        if (verbose) {print(paste0("Input plot count: ", input$plot_count))}
+        max_row <- min(idx[2], nrow(subset_data))
+
+        if (verbose) {print("Creating plot data", quote = FALSE)}
+        plot_data <- subset_data[idx[1]:max_row, ]
+        req(nrow(plot_data) > 0)
+
+        # 2. Resolve image paths per row (Disk -> Memory -> NA)
+        cache_list <- image_cache()
+        plot_data$entity_id <- get_entity_ids(plot_data, "track")
+        plot_data$image_url <- purrr::map_chr(seq_len(nrow(plot_data)), function(i) {
+            row <- plot_data[i, ]
+            resolve_image_path(
+                entity = "track",
+                artist = row$artist,
+                track  = row$track,
+                cache_map = cache_list
+            )
+        })
+
+        # 3. Create labels and lock factor levels in exact rank order
+        plot_data <- plot_data %>%
+            arrange(rank) %>%
+            mutate(
+                label = paste0(rank, "\\. **", smart_wrap(track, settings$smartwrap_target, settings$smartwrap_max),
+                               "**<br>", smart_wrap(artist, settings$smartwrap_target, settings$smartwrap_max)),
+                # rev() ensures Rank 1 stays at the top of the y-axis
+                label = factor(label, levels = rev(label)),
+                nice_timestamp = format(as_datetime(datetime_utc, tz = selected_timezone), format = settings$timestamp_format)
+            )
+
+        # 4. Split dataset into present vs missing AFTER locking factor levels
+        data_present <- plot_data %>% filter(!is.na(image_url) & image_url != "")
+        data_missing <- plot_data %>% filter(is.na(image_url) | image_url == "")
+
+        # Trigger background download ONLY for missing items
+        if (nrow(data_missing) > 0) {
+            trigger_parallel_image_fetch(data_missing, "track")
+        }
+
+        if (verbose) {print(plot_data)}
+
+        # 5. Generate titles
+        left_title <- "Recents"
+        right_title <- paste0(date_range[1], " to ", date_range[2])
+
+        art_val <- ifelse(is.null(input$subset_artist) || input$subset_artist == "", "All", input$subset_artist)
+        alb_val <- ifelse(is.null(input$subset_album) || input$subset_album == "", "All", input$subset_album)
+        tra_val <- ifelse(is.null(input$subset_track) || input$subset_track == "", "All", input$subset_track)
+        caption <- paste0("<b>Artist: </b>", art_val, "<br><b>Album: </b>", alb_val, "<br><b>Track: </b>", tra_val)
+
+        if (!settings$show_title & !settings$show_dates) {left_title <- NULL}
+        if (!settings$show_title & settings$show_dates) {left_title <- ""}
+        if (!settings$show_dates) {right_title <- NULL}
+        if (!settings$show_subset) {caption <- NULL}
+
+        # 6. Generate plot with locked discrete scale
+        p <- ggplot(plot_data, aes(y = label, x = 1)) +
+            scale_y_discrete(limits = levels(plot_data$label), drop = FALSE)
+
+        # Layer 1: Solid placeholder bars for missing images
+        if (nrow(data_missing) > 0) {
+            p <- p + geom_col(
+                data = data_missing,
+                fill = settings$col_colour,
+                col = settings$col_outline_colour,
+                linewidth = settings$col_linewidth
+            )
+        }
+
+        # Layer 2: Image pattern bars for available images
+        if (nrow(data_present) > 0) {
+            p <- p + geom_col_pattern(
+                data = data_present,
+                aes(pattern_filename = image_url),
+                pattern = "image",
+                pattern_type = "expand",
+                col = settings$col_outline_colour,
+                linewidth = settings$col_linewidth
+            ) + scale_pattern_filename_identity()
+        }
+
+        p <- p +
+            geom_shadowtext(aes(label = nice_timestamp), col = settings$text_inside_colour, bg.colour = settings$text_shadow_colour,
+                            hjust = 1 + settings$timestamp_displacement, bg.r = settings$text_shadow_radius, size = settings$text_size) +
+            coord_cartesian(xlim = c(0, NA), expand = FALSE, clip = "off") +
+            labs(title = left_title, tag = right_title, caption = caption) +
+            theme_classic(base_size = settings$base_size) +
+            theme(plot.title = element_text(face = "bold"),
                   plot.caption = element_markdown(size = rel(1), hjust = 0),
                   plot.tag.position = c(1, 1),
                   plot.tag = element_text(size = rel(1.2), hjust = 1, vjust = 1),
